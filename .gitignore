@@ -17,6 +17,9 @@ out/
 *.sqlite3
 *.db
 
+# Dev proxy runtime state (not a secret, just noisy local state)
+request-count.json
+
 # OS files
 .DS_Store
 Thumbs.db

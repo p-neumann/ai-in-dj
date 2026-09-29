@@ -1,0 +1,10 @@
+{
+  "name": "ccdj-dev-proxy",
+  "private": true,
+  "version": "0.0.0",
+  "description": "LOCAL, TEMPORARY dev-only proxy that adds a personal Anthropic API key to the sanitized prototype's requests during Phase 2 characterization. Never deployed. Deleted by end of Phase 4 per CLAUDE.md.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env server.js"
+  }
+}
