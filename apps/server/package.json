@@ -1,0 +1,14 @@
+{
+  "name": "ccdj-server",
+  "private": true,
+  "version": "0.0.0",
+  "description": "CCDJ backend (Phase 3 vertical slice). Node/Fastify - platform-independent, runs the same on Windows dev and the macOS release target.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1"
+  }
+}
