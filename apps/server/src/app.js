@@ -1,4 +1,5 @@
-// Fastify app for the Phase 3 vertical slice (CLAUDE.md Section 5.2's stack
+// Fastify app (Phase 3 slice, now running the Phase 4 recommend pipeline).
+// Stack per CLAUDE.md Section 5.2's
 // decision, docs/decisions/0001-stack.md). Cross-platform Node/Fastify code -
 // nothing here is macOS- or Windows-specific, so this runs identically on
 // both. No Mac-only dependency exists in this file.
@@ -25,9 +26,8 @@ export function buildApp(config = {}) {
       return { ok: false, error: { code: "UNAUTHENTICATED" } };
     }
 
-    const { library, seedTrackId, vibe, energy } = request.body || {};
     try {
-      const data = await recommendTrackCheat({ library, seedTrackId, vibe, energy }, provider);
+      const data = await recommendTrackCheat(request.body || {}, provider);
       return { ok: true, data };
     } catch (err) {
       if (err instanceof ValidationError) {
