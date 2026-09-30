@@ -34,7 +34,7 @@ function detectExtraField(systemText) {
   if (/lane}\]/.test(systemText)) {
     return { field: "lane", values: ["pure", "crossover", "native"] };
   }
-  const campMatch = systemText.match(/camp}\] where camp is either "(\w+)" or "(\w+)"/);
+  const campMatch = systemText.match(/camp}\] where camp is either "(\w+)"[^"]*or "(\w+)"/);
   if (campMatch) {
     return { field: "camp", values: [campMatch[1], campMatch[2]] };
   }

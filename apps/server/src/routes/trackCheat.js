@@ -1,32 +1,39 @@
-// Phase 4 Track Cheat pipeline - supersedes the Phase 3 vertical slice with
-// (nearly) full parity on the DEFAULT, non-hybrid path. Ported and wired,
-// in the source's own order (fetchBangerResults, source ~L3460-3622):
+// Phase 4 Track Cheat pipeline. Ported and wired, in the source's own order
+// (fetchBangerResults, source ~L3460-3622):
 //
-//   seed resolution -> chain vibe lock (R8) -> local seed-year resolution ->
-//   buildSmartCtx -> buildSys -> AI call -> parseJSON -> resolveRes ->
-//   applyGenreWall -> applyGenderFilter -> injectGenreDiversity ->
-//   [R28 fallback chain, up to 2 more AI calls, if <10 results at negative
-//   vibe] -> sortByKeyCompatibility -> deep-mode filter -> session
-//   exclusion update (R12) / cache (R13).
+//   seed resolution -> type-lock detection -> bridge/drift/vibe-drift
+//   resolution -> chain vibe lock (R8) -> genre-island detection -> local
+//   seed-year resolution -> buildSmartCtx -> mergeTypeLockIntoCtx ->
+//   buildSys -> AI call -> parseJSON -> resolveRes -> applyGenreWall ->
+//   applyGenderFilter -> injectGenreDiversity -> applyTypeLock ->
+//   injectTypeLockBalance -> [R28 fallback chain, up to 2 more AI calls, if
+//   <10 results at negative vibe] -> sortByKeyCompatibility -> deep-mode
+//   filter -> session exclusion update (R12) / cache (R13).
 //
-// NOT YET PORTED (each is a separate, well-scoped chunk of Phase 4 - listed
-// honestly rather than silently skipped):
-//   - Type locks (detectStyleTypeLock, mergeTypeLockIntoCtx, applyTypeLock,
-//     injectTypeLockBalance, detectGenreIslandLock) - trackTypeLock is
-//     always [] and genreIslandLock always false, which makes buildSys and
-//     resolveRes naturally take their "no type lock" branch, same as the
-//     prototype does whenever a DJ hasn't typed a type request.
-//   - Hybrid modes: Bridge Mode, Style Drift, Vibe Slider Drift. bridgeInfo/
-//     driftInfo/vibeDriftInfo are always null, so buildSys takes its
-//     default passive-lane-tagging branch, same as the prototype whenever
-//     none of those signals are active.
+// Hybrid mode inputs (bridgeContext/driftContext/vibeDriftContext) are
+// accepted as REQUEST FIELDS, not derived server-side from raw drag events.
+// This matches the source faithfully: fetchBangerResults doesn't compute
+// these itself either - bridgeContextArg/driftContextArg/vibeDriftContextArg
+// arrive as its own parameters, already decided by the client's drop/drag
+// handlers (handleWindowDrop, handleResultDragStart) before fetchBangerResults
+// is ever called. The bigger architectural piece CLAUDE.md Section 5.4 calls
+// for - moving that DECISION (was this drop a bridge swerve? a drift
+// continuation?) server-side into a real session-event state machine - is
+// separate work for when the session-event API (Section 6.4) exists; it is
+// not something the prototype itself does either.
+//
+// NOT YET PORTED (listed honestly rather than silently skipped):
+//   - The server-side session-event API/state machine that would DERIVE
+//     bridgeContext/driftContext/vibeDriftContext from raw drag/drop events
+//     instead of receiving them pre-computed (see note above).
 //   - Drag lean (computeDragLean) - dragLeanHint is always "".
 //   - "Liked"/"ignored" prompt lines and overplayed-pairs note - these read
 //     session vote/play history the server doesn't track yet; always "".
 //   - resolveSeedYearAsync's AI-knowledge fallback - only the local
 //     (no-network) part is ported (seedYear.js); unknown stays unknown
 //     rather than triggering a 4th kind of provider call.
-// Full parity on all of the above is tracked as ongoing Phase 4 work.
+//   - fuzzyFind - bridge mode's old-seed lookup uses an exact
+//     getDisplayName match only, not the source's Levenshtein fallback.
 
 import { buildSmartCtx } from "../engine/candidateSelection.js";
 import { resolveRes } from "../engine/resolveResults.js";
@@ -40,6 +47,10 @@ import { buildSys, divPick } from "../engine/promptBuilder.js";
 import { resolveSeedYearLocal } from "../engine/seedYear.js";
 import { parseJSON } from "../engine/parsing.js";
 import { isFamiliarSongFamily } from "../engine/playCountMode.js";
+import {
+  detectStyleTypeLock, detectGenreIslandLock, mergeTypeLockIntoCtx,
+  applyTypeLock, injectTypeLockBalance
+} from "../engine/typeLock.js";
 import { getExcludedNames, addExcludedNames, cacheGet, cacheSet } from "../session/sessions.js";
 
 export class ValidationError extends Error {}
@@ -77,7 +88,8 @@ export async function recommendTrackCheat(request, provider) {
   const {
     library, seedTrackId, vibe = -3, energy = 0, exclude = [], chainDepth = 0,
     playCountMode = "mix", styleProfile = "", styleProfileEnrichment = null,
-    vibePromptText = "", sessionId = null
+    vibePromptText = "", sessionId = null,
+    bridgeContext = null, driftContext = null, vibeDriftContext = null
   } = request;
 
   if (!Array.isArray(library) || library.length === 0) {
@@ -94,11 +106,36 @@ export async function recommendTrackCheat(request, provider) {
   const seedKey = (seedTrack.key || "").trim();
   const seedGender = inferArtistGender(seedName);
 
+  const trackTypeLock = detectStyleTypeLock(styleProfile + " " + vibePromptText) || [];
+
+  // Bridge > Drift > Vibe Drift - only one hybrid mode active per fetch
+  // (source ~L3481-3512). Each suspends the hard BPM filter for the whole
+  // batch (R10 - "suspension is total").
+  let bridgeInfo = null, driftInfo = null, vibeDriftInfo = null;
+  let effectiveRangeSuspended = false;
+  if (bridgeContext && bridgeContext.oldSeedName) {
+    const oldSeed = library.find((t) => getDisplayName(t) === bridgeContext.oldSeedName);
+    bridgeInfo = {
+      oldSeedName: bridgeContext.oldSeedName,
+      oldSeedBpm: oldSeed ? parseFloat(oldSeed.bpm || 0) : 0,
+      oldSeedGenre: (oldSeed && oldSeed.genre && oldSeed.genre.trim()) || inferGenreLocal(bridgeContext.oldSeedName) || ""
+    };
+    effectiveRangeSuspended = true;
+  } else if (driftContext && driftContext.active) {
+    driftInfo = { active: true, detectedLane: driftContext.detectedLane, crossoverGenre: driftContext.crossoverGenre || "" };
+    effectiveRangeSuspended = true;
+  } else if (vibeDriftContext) {
+    vibeDriftInfo = { newVibeOffset: vibeDriftContext.newVibeOffset };
+    effectiveRangeSuspended = true;
+  }
+
   // R8: chain vibe lock - a chain in progress holds -3 ("same era, same
-  // feel") regardless of the slider, UNLESS vibe-slider-drift is active.
-  // vibeDriftInfo is always null here (not ported), so any active chain
-  // always locks to -3, same as the prototype whenever drift isn't firing.
-  const currentVibe = chainDepth > 0 ? -3 : vibe;
+  // feel") regardless of the slider, UNLESS the DJ has moved the vibe
+  // slider since the chain started (signaled by vibeDriftInfo being set).
+  const userMovedSliderSinceChainStart = !!vibeDriftInfo;
+  const currentVibe = (chainDepth > 0 && !userMovedSliderSinceChainStart) ? -3 : vibe;
+
+  const genreIslandLock = detectGenreIslandLock(trackTypeLock, seedGenre, currentVibe);
 
   const seedYear = resolveSeedYearLocal(seedTrack, seedName, library);
   const strictEra = currentVibe <= -3 && seedYear > 0;
@@ -108,7 +145,7 @@ export async function recommendTrackCheat(request, provider) {
   const compat = compatibleKeys(seedKey);
   const bpmN = range ? "BPM between " + Math.round(range[0]) + " and " + Math.round(range[1]) + " only." : "";
   const keyN = compat.length ? "Prefer keys: " + compat.join(", ") + "." : "";
-  const effectiveRange = range; // no suspension - bridge/drift not ported, so never null here
+  const effectiveRange = effectiveRangeSuspended ? null : range;
 
   const excludeTitles = new Set();
   const seedRawTitle = getRawTitleFromName(seedName);
@@ -122,13 +159,14 @@ export async function recommendTrackCheat(request, provider) {
   const prefs = { styleProfile, styleProfileEnrichment, playCountMode };
 
   function buildCtxFor(shuffle, retryMode, invertGenreOverride) {
-    const ctx = buildSmartCtx(library, seedGenre, shuffle, "", seedBpm, retryMode, excludeTitles, seedYear, strictEra, invertGenreOverride);
+    let ctx = buildSmartCtx(library, seedGenre, shuffle, "", seedBpm, retryMode, excludeTitles, seedYear, strictEra, invertGenreOverride);
+    ctx = mergeTypeLockIntoCtx(ctx, trackTypeLock, library);
     ctx.seedGenre = seedGenre;
     return ctx;
   }
 
   function sys(vibeForPrompt, isRetry, retryHint) {
-    return buildSys(bpmN, keyN, divPick(), vibeForPrompt, seedGenre, "", isRetry, yearNote, seedGender, retryHint, vibePromptText, null, null, null, "", [], false, prefs);
+    return buildSys(bpmN, keyN, divPick(), vibeForPrompt, seedGenre, "", isRetry, yearNote, seedGender, retryHint, vibePromptText, bridgeInfo, driftInfo, vibeDriftInfo, "", trackTypeLock, genreIslandLock, prefs);
   }
 
   let resolved;
@@ -137,9 +175,9 @@ export async function recommendTrackCheat(request, provider) {
   let candidatePoolSize = 0;
 
   try {
-    // Fetch #1: real, faithful default path (invertGenre uses the RAW
-    // slider value, not the chain-overridden currentVibe - matches
-    // buildCtx's own closure-read of vibeOffset in the source).
+    // Fetch #1: invertGenre uses the RAW slider value, not the
+    // chain-overridden currentVibe - matches buildCtx's own closure-read
+    // of vibeOffset in the source.
     const ctx1 = buildCtxFor(true, false, vibe > 0);
     candidatePoolSize = ctx1.indexed.length;
     resolved = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, allEx);
@@ -150,6 +188,8 @@ export async function recommendTrackCheat(request, provider) {
     resolved = applyGenreWall(resolved, seedGenre, currentVibe);
     resolved = applyGenderFilter(resolved, seedGender, currentVibe);
     resolved = injectGenreDiversity(resolved, ctx1.indexed, seedGenre, currentVibe, effectiveRange, allEx, seedName);
+    resolved = applyTypeLock(resolved, trackTypeLock);
+    resolved = injectTypeLockBalance(resolved, trackTypeLock, library, allEx, seedName);
 
     const genderCorrectCount = resolved.filter((t) => !t._genderStretch).length;
     const skipFallback = currentVibe === -8 && seedGender && genderCorrectCount > 0 && resolved.length >= 5;
@@ -164,6 +204,8 @@ export async function recommendTrackCheat(request, provider) {
         let resolved2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, allEx);
         resolved2 = applyGenreWall(resolved2, seedGenre, currentVibe);
         resolved2 = applyGenderFilter(resolved2, seedGender, currentVibe);
+        resolved2 = applyTypeLock(resolved2, trackTypeLock);
+        resolved2 = injectTypeLockBalance(resolved2, trackTypeLock, library, allEx, seedName);
 
         if (resolved2.length >= 5 || (resolved2.length > 0 && resolved.length === 0)) {
           resolved = resolved2.length > 0 ? resolved2 : resolved;
@@ -175,6 +217,8 @@ export async function recommendTrackCheat(request, provider) {
             let resolved3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, allEx);
             resolved3 = applyGenreWall(resolved3, seedGenre, looserVibe);
             resolved3 = applyGenderFilter(resolved3, seedGender, looserVibe);
+            resolved3 = applyTypeLock(resolved3, trackTypeLock);
+            resolved3 = injectTypeLockBalance(resolved3, trackTypeLock, library, allEx, seedName);
             const candidates = [resolved3, resolved2, resolved].sort((a, b) => b.length - a.length);
             resolved = candidates[0];
           } catch {
@@ -211,7 +255,10 @@ export async function recommendTrackCheat(request, provider) {
     trackId: r.trackId || (r._libTrack && r._libTrack.id),
     name: r.name,
     bpm: r.bpm,
-    key: r.key
+    key: r.key,
+    camp: r.camp || null,
+    lane: r.lane || null,
+    crossoverGenre: r.crossoverGenre || null
   }));
 
   if (results.length > 0) {
@@ -226,6 +273,7 @@ export async function recommendTrackCheat(request, provider) {
     returned: results.length,
     fallbackDepth,
     cached,
+    mode: bridgeInfo ? "bridge" : driftInfo ? "styleDrift" : vibeDriftInfo ? "vibeDrift" : "none",
     simulated: provider.kind !== "anthropic"
   };
 }
