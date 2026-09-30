@@ -1,16 +1,17 @@
 // Ported verbatim from reference/CheatCodeDJ_v_1_0_22016.sanitized.jsx
-// (source lines 1996-2075, function resolveRes). Logic and Mike's dated
+// (source lines 1996-2075, function resolveRes, including the
+// invertGenreForSort branch used at positive vibe). Logic and Mike's dated
 // comments preserved unchanged.
 //
-// SCOPE NOTE: this covers the default (non-hybrid) post-processing path.
-// applyGenreWall, applyGenderFilter, applyTypeLock, injectGenreDiversity,
-// injectTypeLockBalance, and sortByKeyCompatibility (CLAUDE.md Appendix B)
-// run AFTER this in the full prototype and are not yet ported - Phase 4
-// work. This function alone is real, working post-processing: it is what
-// turns "the model said these IDs" into "these IDs are confirmed real
-// library tracks, deduped by song, never the seed, within the BPM window."
+// SCOPE NOTE: applyTypeLock and injectTypeLockBalance (type-lock support)
+// are not yet ported - see trackCheat.js header. applyGenreWall,
+// applyGenderFilter, injectGenreDiversity, sortByKeyCompatibility, and the
+// deep-mode filter ARE ported (postProcessing.js, keyCompatibility.js,
+// playCountMode.js) and run after this function, same order as the source.
 
 import { getDisplayName, getArtistTitle, isSameSong } from "./trackNames.js";
+import { getAdjacentGenres, genreMatches } from "./genre.js";
+import { inferGenreLocal } from "./artistLookup.js";
 
 export function resolveRes(results, indexed, seedName, seedGenreForSort, invertGenreForSort, rangeForFilter, allExForFilter, playedNames) {
   var seen = {};
@@ -48,12 +49,27 @@ export function resolveRes(results, indexed, seedName, seedGenreForSort, invertG
   }
 
   if (invertGenreForSort && seedGenreForSort) {
-    // Positive-vibe genre blend sort - see CLAUDE.md R2. Ported for
-    // completeness; genreMatches/getAdjacentGenres imports needed if this
-    // branch is exercised. Left inert (not wired to genre.js) until a test
-    // actually exercises invertGenreForSort, so it doesn't silently diverge
-    // from the source if ported incorrectly without a fixture to check it against.
-    throw new Error("resolveRes: invertGenreForSort path not yet ported/tested - see docs/QUESTIONS.md R2");
+    // Positive-vibe genre blend sort (source lines 2041-2072, R2 in
+    // CLAUDE.md - the "some same-genre room must survive" design intent).
+    var adjacentNarrow = getAdjacentGenres(seedGenreForSort);
+    var getTrackGenreForSort = function (t) {
+      var lg = t._libTrack && t._libTrack.genre && t._libTrack.genre.trim();
+      return lg || inferGenreLocal(t.name) || null;
+    };
+    var tier0 = [], tier1 = [], tier2 = [];
+    deduped.forEach(function (t) {
+      var g = getTrackGenreForSort(t);
+      if (!g) tier1.push(t);
+      else if (genreMatches(g, adjacentNarrow)) tier2.push(t);
+      else tier0.push(t);
+    });
+    var seenT0Genres = {}, t0New = [], t0Repeat = [];
+    tier0.forEach(function (t) {
+      var g = (getTrackGenreForSort(t) || "").toLowerCase().trim();
+      if (g && !seenT0Genres[g]) { seenT0Genres[g] = true; t0New.push(t); }
+      else t0Repeat.push(t);
+    });
+    deduped = t0New.concat(t0Repeat).concat(tier1).concat(tier2);
   }
 
   return deduped.slice(0, 10).sort(function (a, b) { return parseFloat(a.bpm || 0) - parseFloat(b.bpm || 0); });
