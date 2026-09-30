@@ -1,39 +1,43 @@
 // Phase 4 Track Cheat pipeline. Ported and wired, in the source's own order
 // (fetchBangerResults, source ~L3460-3622):
 //
-//   seed resolution -> type-lock detection -> bridge/drift/vibe-drift
-//   resolution -> chain vibe lock (R8) -> genre-island detection -> local
-//   seed-year resolution -> buildSmartCtx -> mergeTypeLockIntoCtx ->
-//   buildSys -> AI call -> parseJSON -> resolveRes -> applyGenreWall ->
-//   applyGenderFilter -> injectGenreDiversity -> applyTypeLock ->
-//   injectTypeLockBalance -> [R28 fallback chain, up to 2 more AI calls, if
-//   <10 results at negative vibe] -> sortByKeyCompatibility -> deep-mode
-//   filter -> session exclusion update (R12) / cache (R13).
+//   seed resolution -> type-lock detection -> session-derived chain/bridge/
+//   drift/vibe-drift state -> chain vibe lock (R8) -> genre-island
+//   detection -> local seed-year resolution -> buildSmartCtx ->
+//   mergeTypeLockIntoCtx -> buildSys -> AI call -> parseJSON -> resolveRes
+//   -> applyGenreWall -> applyGenderFilter -> injectGenreDiversity ->
+//   applyTypeLock -> injectTypeLockBalance -> [R28 fallback chain] ->
+//   sortByKeyCompatibility -> deep-mode filter -> session commit (R12/R13,
+//   lastBatch for the NEXT event to react to).
 //
-// Hybrid mode inputs (bridgeContext/driftContext/vibeDriftContext) are
-// accepted as REQUEST FIELDS, not derived server-side from raw drag events.
-// This matches the source faithfully: fetchBangerResults doesn't compute
-// these itself either - bridgeContextArg/driftContextArg/vibeDriftContextArg
-// arrive as its own parameters, already decided by the client's drop/drag
-// handlers (handleWindowDrop, handleResultDragStart) before fetchBangerResults
-// is ever called. The bigger architectural piece CLAUDE.md Section 5.4 calls
-// for - moving that DECISION (was this drop a bridge swerve? a drift
-// continuation?) server-side into a real session-event state machine - is
-// separate work for when the session-event API (Section 6.4) exists; it is
-// not something the prototype itself does either.
+// Hybrid-mode inputs (bridge/drift/vibe-drift) are now DERIVED from session
+// state (session/sessionStore.js, mutated by session/sessionEvents.js via
+// POST /v1/sessions/:id/events), not accepted as request fields - this is
+// the real architecture CLAUDE.md Section 5.4 calls for: the state machine
+// lives server-side. `sessionId` is optional; without one, every fetch is
+// stateless (chainDepth 0, no hybrid modes, no exclusion memory) - same
+// degraded-but-working behavior as before session support existed.
+//
+// Ordering (CLAUDE.md Section 6.3): a session-scoped recommend call carries
+// `clientSeq`. A call whose clientSeq is not newer than the session's last
+// accepted one is rejected before any provider call (STALE_EVENT, no
+// network spent). A call that WAS newest when it started but got
+// overtaken by a newer accepted change while its provider call was in
+// flight returns `superseded:true` and commits nothing (no exclusion
+// update, no lastBatch update, no cache write) - only the results
+// themselves are still returned, for transparency, per "commits nothing
+// except usage/cost logging".
 //
 // NOT YET PORTED (listed honestly rather than silently skipped):
-//   - The server-side session-event API/state machine that would DERIVE
-//     bridgeContext/driftContext/vibeDriftContext from raw drag/drop events
-//     instead of receiving them pre-computed (see note above).
+//   - "likedAsSeed" as its own trigger label - see sessionEvents.js header.
 //   - Drag lean (computeDragLean) - dragLeanHint is always "".
 //   - "Liked"/"ignored" prompt lines and overplayed-pairs note - these read
-//     session vote/play history the server doesn't track yet; always "".
+//     vote/play history the server doesn't fold into prompts yet; always "".
 //   - resolveSeedYearAsync's AI-knowledge fallback - only the local
-//     (no-network) part is ported (seedYear.js); unknown stays unknown
-//     rather than triggering a 4th kind of provider call.
-//   - fuzzyFind - bridge mode's old-seed lookup uses an exact
-//     getDisplayName match only, not the source's Levenshtein fallback.
+//     (no-network) part is ported (seedYear.js); unknown stays unknown.
+//   - fuzzyFind - bridge mode's old-seed lookup uses an exact id match only.
+//   - Do Not Play enforcement (R27) - sessionPrefs are stored but not yet
+//     applied as a filter; that's an open question for Mike either way.
 
 import { buildSmartCtx } from "../engine/candidateSelection.js";
 import { resolveRes } from "../engine/resolveResults.js";
@@ -51,7 +55,7 @@ import {
   detectStyleTypeLock, detectGenreIslandLock, mergeTypeLockIntoCtx,
   applyTypeLock, injectTypeLockBalance
 } from "../engine/typeLock.js";
-import { getExcludedNames, addExcludedNames, cacheGet, cacheSet } from "../session/sessions.js";
+import { getSession } from "../session/sessionStore.js";
 
 export class ValidationError extends Error {}
 
@@ -84,12 +88,15 @@ async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effe
   return resolveRes(rawResults, ctx.indexed, seedName, ctx.seedGenre, vibeForSort > 0, effectiveRange, allEx, playedNames);
 }
 
+function makeBatchId() {
+  return "b_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 export async function recommendTrackCheat(request, provider) {
   const {
-    library, seedTrackId, vibe = -3, energy = 0, exclude = [], chainDepth = 0,
+    library, seedTrackId, vibe = -3, energy = 0, exclude = [],
     playCountMode = "mix", styleProfile = "", styleProfileEnrichment = null,
-    vibePromptText = "", sessionId = null,
-    bridgeContext = null, driftContext = null, vibeDriftContext = null
+    vibePromptText = "", sessionId = null, clientSeq = null, expectedStateVersion = null
   } = request;
 
   if (!Array.isArray(library) || library.length === 0) {
@@ -100,6 +107,24 @@ export async function recommendTrackCheat(request, provider) {
     throw new ValidationError("seedTrackId not found in library");
   }
 
+  let session = null;
+  if (sessionId) {
+    session = getSession(sessionId);
+    if (!session) throw new ValidationError("Unknown sessionId");
+    if (typeof clientSeq !== "number") throw new ValidationError("clientSeq is required when sessionId is set");
+
+    const staleAtStart = clientSeq <= session.lastClientSeq
+      || (expectedStateVersion !== null && expectedStateVersion !== session.stateVersion);
+    if (staleAtStart) {
+      return {
+        results: [], candidatePoolSize: 0, requested: 20, returned: 0,
+        fallbackDepth: 0, cached: false, mode: "none", trigger: null,
+        chain: { chainId: session.chainId, depth: session.daisyChainDepth },
+        superseded: true, simulated: provider.kind !== "anthropic"
+      };
+    }
+  }
+
   const seedName = getDisplayName(seedTrack);
   const seedGenre = (seedTrack.genre && seedTrack.genre.trim()) || inferGenreLocal(seedName) || "";
   const seedBpm = parseFloat(seedTrack.bpm || "0") || 0;
@@ -108,32 +133,32 @@ export async function recommendTrackCheat(request, provider) {
 
   const trackTypeLock = detectStyleTypeLock(styleProfile + " " + vibePromptText) || [];
 
+  const daisyChainDepth = session ? session.daisyChainDepth : 0;
+
   // Bridge > Drift > Vibe Drift - only one hybrid mode active per fetch
-  // (source ~L3481-3512). Each suspends the hard BPM filter for the whole
-  // batch (R10 - "suspension is total").
+  // (source ~L3481-3512), all derived from session state now.
   let bridgeInfo = null, driftInfo = null, vibeDriftInfo = null;
   let effectiveRangeSuspended = false;
-  if (bridgeContext && bridgeContext.oldSeedName) {
-    const oldSeed = library.find((t) => getDisplayName(t) === bridgeContext.oldSeedName);
-    bridgeInfo = {
-      oldSeedName: bridgeContext.oldSeedName,
-      oldSeedBpm: oldSeed ? parseFloat(oldSeed.bpm || 0) : 0,
-      oldSeedGenre: (oldSeed && oldSeed.genre && oldSeed.genre.trim()) || inferGenreLocal(bridgeContext.oldSeedName) || ""
-    };
+  if (session && session.bridgeContext) {
+    const oldSeed = library.find((t) => t.id === session.bridgeContext.oldSeedTrackId);
+    bridgeInfo = oldSeed ? {
+      oldSeedName: getDisplayName(oldSeed),
+      oldSeedBpm: parseFloat(oldSeed.bpm || 0),
+      oldSeedGenre: (oldSeed.genre && oldSeed.genre.trim()) || inferGenreLocal(getDisplayName(oldSeed)) || ""
+    } : null;
+    if (bridgeInfo) effectiveRangeSuspended = true;
+  } else if (session && session.driftContext && session.driftContext.active) {
+    driftInfo = { active: true, detectedLane: session.driftContext.detectedLane, crossoverGenre: session.driftContext.crossoverGenre || "" };
     effectiveRangeSuspended = true;
-  } else if (driftContext && driftContext.active) {
-    driftInfo = { active: true, detectedLane: driftContext.detectedLane, crossoverGenre: driftContext.crossoverGenre || "" };
-    effectiveRangeSuspended = true;
-  } else if (vibeDriftContext) {
-    vibeDriftInfo = { newVibeOffset: vibeDriftContext.newVibeOffset };
+  } else if (session && session.pendingVibeDriftOffset !== null) {
+    vibeDriftInfo = { newVibeOffset: session.pendingVibeDriftOffset };
     effectiveRangeSuspended = true;
   }
 
   // R8: chain vibe lock - a chain in progress holds -3 ("same era, same
-  // feel") regardless of the slider, UNLESS the DJ has moved the vibe
-  // slider since the chain started (signaled by vibeDriftInfo being set).
+  // feel") regardless of the slider, UNLESS vibe-slider-drift is active.
   const userMovedSliderSinceChainStart = !!vibeDriftInfo;
-  const currentVibe = (chainDepth > 0 && !userMovedSliderSinceChainStart) ? -3 : vibe;
+  const currentVibe = (daisyChainDepth > 0 && !userMovedSliderSinceChainStart) ? -3 : vibe;
 
   const genreIslandLock = detectGenreIslandLock(trackTypeLock, seedGenre, currentVibe);
 
@@ -151,10 +176,28 @@ export async function recommendTrackCheat(request, provider) {
   const seedRawTitle = getRawTitleFromName(seedName);
   if (seedRawTitle) excludeTitles.add(seedRawTitle);
 
-  // R12 (defect fix): session-remembered exclusions, uncapped, merged with
-  // whatever this request itself asked to exclude - no 20-item slice.
-  const sessionExcluded = getExcludedNames(sessionId);
-  const allEx = Array.from(new Set([...exclude, ...sessionExcluded]));
+  // Session exclusions are stored by trackId (real, durable identifier)
+  // and resolved to names against THIS request's library. Two genuinely
+  // different mechanisms, traced from the source (see sessionStore.js
+  // header for the exact add/remove rules and why they're kept separate):
+  //   - allEx: exact-name match (shownTrackIds + downvotedTrackIds +
+  //     whatever this request itself passed in `exclude`). Uncapped -
+  //     no 20-item slice. downvotedTrackIds being read here at all, on
+  //     every path, with no cap, IS the R12 minimal fix.
+  //   - playedNames: fuzzy isSameSong match (playedTrackIds only) - also
+  //     blocks other edits/remixes of the same song, matching the
+  //     source's playedNamesRef behavior specifically for dragged-out
+  //     tracks, not merely-shown ones.
+  function namesFor(trackIdSet) {
+    if (!session) return [];
+    return Array.from(trackIdSet).map((id) => library.find((t) => t.id === id)).filter(Boolean).map(getDisplayName);
+  }
+  const allEx = Array.from(new Set([
+    ...exclude,
+    ...(session ? namesFor(session.shownTrackIds) : []),
+    ...(session ? namesFor(session.downvotedTrackIds) : [])
+  ]));
+  const playedNames = session ? namesFor(session.playedTrackIds) : [];
 
   const prefs = { styleProfile, styleProfileEnrichment, playCountMode };
 
@@ -175,16 +218,9 @@ export async function recommendTrackCheat(request, provider) {
   let candidatePoolSize = 0;
 
   try {
-    // Fetch #1: invertGenre uses the RAW slider value, not the
-    // chain-overridden currentVibe - matches buildCtx's own closure-read
-    // of vibeOffset in the source.
     const ctx1 = buildCtxFor(true, false, vibe > 0);
     candidatePoolSize = ctx1.indexed.length;
-    resolved = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, allEx);
-    // resolveRes already drops the seed itself (isSameSong check against
-    // the same seedName passed here) - the source's extra outer
-    // `.filter(t=>!isSameSong(fname,t.name))` after resolveRes is
-    // therefore redundant with this call path and intentionally omitted.
+    resolved = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, playedNames);
     resolved = applyGenreWall(resolved, seedGenre, currentVibe);
     resolved = applyGenderFilter(resolved, seedGender, currentVibe);
     resolved = injectGenreDiversity(resolved, ctx1.indexed, seedGenre, currentVibe, effectiveRange, allEx, seedName);
@@ -197,11 +233,8 @@ export async function recommendTrackCheat(request, provider) {
     if (resolved.length < 10 && currentVibe < 0 && !skipFallback) {
       fallbackDepth = 1;
       try {
-        // Fetch #2 (R28): note invertGenre is NOT passed here, matching the
-        // source's own doFetch call (only 8 args to buildSmartCtx) -
-        // fallback retries never invert genre regardless of slider sign.
         const ctx2 = buildCtxFor(true, true, undefined);
-        let resolved2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, allEx);
+        let resolved2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, playedNames);
         resolved2 = applyGenreWall(resolved2, seedGenre, currentVibe);
         resolved2 = applyGenderFilter(resolved2, seedGender, currentVibe);
         resolved2 = applyTypeLock(resolved2, trackTypeLock);
@@ -214,7 +247,7 @@ export async function recommendTrackCheat(request, provider) {
           const looserVibe = Math.min(currentVibe + 2, 0);
           try {
             const ctx3 = buildCtxFor(true, true, undefined);
-            let resolved3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, allEx);
+            let resolved3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, playedNames);
             resolved3 = applyGenreWall(resolved3, seedGenre, looserVibe);
             resolved3 = applyGenderFilter(resolved3, seedGender, looserVibe);
             resolved3 = applyTypeLock(resolved3, trackTypeLock);
@@ -230,11 +263,8 @@ export async function recommendTrackCheat(request, provider) {
       }
     }
   } catch (err) {
-    const cachedFallback = cacheGet(sessionId, seedTrackId, currentVibe, energy);
+    const cachedFallback = session ? session.cache.get(seedTrackId + "|v" + currentVibe + "|e" + energy) : null;
     if (cachedFallback && cachedFallback.length) {
-      // R13 (defect fix): re-validate before showing - current exclusions
-      // and continued presence in the (possibly changed) library, not
-      // shown blindly.
       const libraryIds = new Set(library.map((t) => t.id));
       const excludedSet = new Set(allEx);
       resolved = cachedFallback.filter((r) => libraryIds.has(r.trackId) && !excludedSet.has(r.name));
@@ -261,9 +291,33 @@ export async function recommendTrackCheat(request, provider) {
     crossoverGenre: r.crossoverGenre || null
   }));
 
-  if (results.length > 0) {
-    addExcludedNames(sessionId, results.map((r) => r.name));
-    if (!cached) cacheSet(sessionId, seedTrackId, currentVibe, energy, results);
+  const mode = bridgeInfo ? "bridge" : driftInfo ? "styleDrift" : vibeDriftInfo ? "vibeDrift" : "none";
+  const trigger = session && session.pendingManualRetry ? "manualRetry"
+    : bridgeInfo ? "bridgeSwerve"
+    : driftInfo ? "styleDrift"
+    : vibeDriftInfo ? "vibeDrift"
+    : daisyChainDepth > 0 ? "daisyChain"
+    : (session && session.lastSeedOrigin === "search") ? "search"
+    : "freshSeed";
+
+  let superseded = false;
+  if (session) {
+    // Re-check: did a newer session-changing request land while our
+    // provider call(s) were in flight? If so, this result is stale -
+    // return it for transparency but commit nothing (CLAUDE.md 6.3).
+    superseded = clientSeq <= session.lastClientSeq;
+    if (!superseded) {
+      const batchId = makeBatchId();
+      session.lastBatch = { batchId, results };
+      results.forEach((r) => session.shownTrackIds.add(r.trackId));
+      session.pendingVibeDriftOffset = null;
+      session.pendingManualRetry = false;
+      if (!cached && results.length > 0) {
+        session.cache.set(seedTrackId + "|v" + currentVibe + "|e" + energy, results);
+      }
+      session.lastClientSeq = clientSeq;
+      session.stateVersion += 1;
+    }
   }
 
   return {
@@ -273,7 +327,11 @@ export async function recommendTrackCheat(request, provider) {
     returned: results.length,
     fallbackDepth,
     cached,
-    mode: bridgeInfo ? "bridge" : driftInfo ? "styleDrift" : vibeDriftInfo ? "vibeDrift" : "none",
+    mode,
+    trigger,
+    chain: session ? { chainId: session.chainId, depth: session.daisyChainDepth } : null,
+    superseded,
+    stateVersion: session ? session.stateVersion : null,
     simulated: provider.kind !== "anthropic"
   };
 }

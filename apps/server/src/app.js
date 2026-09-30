@@ -1,12 +1,13 @@
-// Fastify app (Phase 3 slice, now running the Phase 4 recommend pipeline).
-// Stack per CLAUDE.md Section 5.2's
-// decision, docs/decisions/0001-stack.md). Cross-platform Node/Fastify code -
-// nothing here is macOS- or Windows-specific, so this runs identically on
-// both. No Mac-only dependency exists in this file.
+// Fastify app (Phase 3 slice, now running the Phase 4 recommend pipeline
+// plus the Section 6.4 session-event system). Stack per CLAUDE.md Section
+// 5.2's decision, docs/decisions/0001-stack.md. Cross-platform Node/Fastify
+// code - nothing here is macOS- or Windows-specific, so this runs
+// identically on both.
 
 import Fastify from "fastify";
 import { checkDevToken } from "./auth/devToken.js";
 import { recommendTrackCheat, ValidationError } from "./routes/trackCheat.js";
+import { registerSessionRoutes } from "./routes/sessions.js";
 import { createMockProvider } from "./providers/mockProvider.js";
 
 // config: { devTokens: string[], provider: {call} }
@@ -19,13 +20,17 @@ export function buildApp(config = {}) {
 
   const app = Fastify({ logger: false });
 
-  app.post("/v1/track-cheat/recommend", async (request, reply) => {
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url === "/healthz") return;
     const auth = checkDevToken(request.headers["authorization"], devTokens);
     if (!auth.ok) {
-      reply.code(401);
-      return { ok: false, error: { code: "UNAUTHENTICATED" } };
+      reply.code(401).send({ ok: false, error: { code: "UNAUTHENTICATED" } });
     }
+  });
 
+  registerSessionRoutes(app);
+
+  app.post("/v1/track-cheat/recommend", async (request, reply) => {
     try {
       const data = await recommendTrackCheat(request.body || {}, provider);
       return { ok: true, data };
