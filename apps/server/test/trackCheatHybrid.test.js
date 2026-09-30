@@ -110,8 +110,13 @@ test("Vibe Slider Drift: overrides the chain lock and reports mode:vibeDrift", a
   });
   assert.equal(data.mode, "vibeDrift");
   assert.ok(data.results.length > 0);
+  // Positive vibe (4) also triggers injectGenreDiversity, which can splice
+  // in guaranteed-diverse library tracks the model never saw/tagged - those
+  // legitimately carry no camp, same as the source. At least one real
+  // model-tagged result should still show a camp value.
+  assert.ok(data.results.some((r) => ["chain", "vibe"].includes(r.camp)));
   for (const r of data.results) {
-    assert.ok(["chain", "vibe"].includes(r.camp), `expected camp chain/vibe, got ${r.camp}`);
+    assert.ok(r.camp === null || ["chain", "vibe"].includes(r.camp), `unexpected camp value: ${r.camp}`);
   }
 });
 
