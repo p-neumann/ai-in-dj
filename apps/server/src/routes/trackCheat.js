@@ -177,13 +177,19 @@ export async function recommendTrackCheat(request, provider) {
   if (seedRawTitle) excludeTitles.add(seedRawTitle);
 
   // Session exclusions are stored by trackId (real, durable identifier)
-  // and resolved to names against THIS request's library. Two genuinely
+  // and resolved to names against THIS request's library. Three genuinely
   // different mechanisms, traced from the source (see sessionStore.js
   // header for the exact add/remove rules and why they're kept separate):
-  //   - allEx: exact-name match (shownTrackIds + downvotedTrackIds +
-  //     whatever this request itself passed in `exclude`). Uncapped -
-  //     no 20-item slice. downvotedTrackIds being read here at all, on
-  //     every path, with no cap, IS the R12 minimal fix.
+  //   - shown names: exact match, capped to the most recently shown 20 -
+  //     this matches the prototype's own bangerExcluded usage exactly
+  //     (`allEx=(exclude||[]).slice(-20)`, source ~L3512). Not something
+  //     this port is authorized to widen on its own (CLAUDE.md Top Rule 5
+  //     - that would be a musical-behavior change needing Mike's
+  //     approval); docs/QUESTIONS.md records this as the resolved default.
+  //   - downvoted names: exact match, UNCAPPED. This is R12's actual,
+  //     explicitly authorized minimal fix - the prototype's own
+  //     globalExcluded was "written but never read" (CLAUDE.md R12); this
+  //     reads it, on every path, with no cap, only for the down-vote list.
   //   - playedNames: fuzzy isSameSong match (playedTrackIds only) - also
   //     blocks other edits/remixes of the same song, matching the
   //     source's playedNamesRef behavior specifically for dragged-out
@@ -192,9 +198,10 @@ export async function recommendTrackCheat(request, provider) {
     if (!session) return [];
     return Array.from(trackIdSet).map((id) => library.find((t) => t.id === id)).filter(Boolean).map(getDisplayName);
   }
+  const shownNamesCapped = session ? namesFor(session.shownTrackIds).slice(-20) : [];
   const allEx = Array.from(new Set([
     ...exclude,
-    ...(session ? namesFor(session.shownTrackIds) : []),
+    ...shownNamesCapped,
     ...(session ? namesFor(session.downvotedTrackIds) : [])
   ]));
   const playedNames = session ? namesFor(session.playedTrackIds) : [];

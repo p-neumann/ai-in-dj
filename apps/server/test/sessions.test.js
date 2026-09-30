@@ -217,3 +217,58 @@ test("shown-exclusion and thumbs-down exclusion are independent: un-voting doesn
     restore();
   }
 });
+
+test("shown-exclusion caps at the most recently shown 20, matching the prototype's own bangerExcluded usage (not R12's uncapped rule, which is thumbs-down only)", async () => {
+  const restore = seedRandom(1);
+  try {
+    const app = makeApp();
+    const n = 30;
+    const library = [
+      { id: "seed", artist: "Seed", title: "Origin", bpm: "120", key: "8A", genre: "edm", year: "2020", playcount: "5" },
+      ...Array.from({ length: n }, (_, i) => ({
+        id: "t" + String(i).padStart(2, "0"),
+        artist: "Artist " + String(i).padStart(2, "0"),
+        title: "TrackQ" + String(i).padStart(2, "0"),
+        bpm: String(120 + (i % 6)),
+        key: "8A",
+        genre: "edm",
+        year: "2020",
+        playcount: "1"
+      }))
+    ];
+
+    const session = await createSession(app);
+    let clientSeq = 1;
+    const batches = [];
+    for (let call = 0; call < 4; call++) {
+      await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "seed", origin: "search", clientSeq: clientSeq++ });
+      const r = await recommendOk(app, { library, seedTrackId: "seed", sessionId: session.sessionId, clientSeq: clientSeq++ });
+      batches.push(r.results.map((x) => x.trackId));
+    }
+
+    // Deterministic under this seed (verified while writing this test):
+    // batch1 (10) + batch2 (10) = 20 shown, exactly at the cap boundary -
+    // batch2 has zero overlap with batch1 (nothing old enough to repeat yet).
+    assert.equal(batches[0].length, 10);
+    assert.equal(batches[1].length, 10);
+    assert.equal(batches[0].filter((id) => batches[1].includes(id)).length, 0);
+
+    // batch3 pushes cumulative shown to 24 - still entirely new tracks.
+    assert.equal(batches[2].length, 4);
+    assert.equal(batches[2].filter((id) => [...batches[0], ...batches[1]].includes(id)).length, 0);
+
+    // batch4: the window (last 20 of 24 shown) now excludes only
+    // batches[1]+batches[2]+the LAST 6 of batches[0] - the first 4 tracks
+    // ever shown (batches[0]'s earliest 4, by insertion order) have aged
+    // out of the cap and are eligible again. With the fresh pool now
+    // exhausted (30 tracks - 1 seed - 24 already shown = 5 left, and this
+    // run's candidate selection didn't surface those 5 here), the engine
+    // reaches back to exactly those 4 re-eligible tracks.
+    assert.deepEqual(batches[3], batches[0].slice(0, 4), "the earliest-shown tracks must reappear once they age out of the 20-item window");
+
+    const raw = getSession(session.sessionId);
+    assert.ok(raw.shownTrackIds.size >= 24, "the underlying shown set itself keeps growing unbounded, same as the source's bangerExcluded state - only what's ENFORCED per request is capped");
+  } finally {
+    restore();
+  }
+});

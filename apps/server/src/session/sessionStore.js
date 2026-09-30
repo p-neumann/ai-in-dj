@@ -51,7 +51,12 @@ export function createSession() {
     //
     // - shownTrackIds: every track returned in a committed batch (source:
     //   bangerExcluded). Add-only, never removed within a session. Exact
-    //   name match only (source: allEx / allExForFilter).
+    //   name match only (source: allEx / allExForFilter). The SET here
+    //   grows unbounded (matching bangerExcluded's own state), but
+    //   trackCheat.js only applies the most recently shown 20 of it as a
+    //   hard exclusion per request, matching the source's own
+    //   `allEx=(exclude||[]).slice(-20)` - not something this port widens
+    //   on its own (see docs/QUESTIONS.md).
     // - downvotedTrackIds: R12's actual target. Added on vote "down",
     //   REMOVED if the DJ un-votes (down -> null) - source:
     //   `if(current==="down"&&next===null)` in handleVote. The prototype's
