@@ -190,3 +190,29 @@ test("drag lean: with no drags this session, the prompt carries no secondary sig
   const data = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t1", sessionId: session.sessionId, clientSeq: 2 });
   assert.ok(data.results.length >= 0); // sanity: pipeline still runs fine with zero drag history
 });
+
+test("the prompt tells the model what to avoid (exN) and what the DJ liked (likedN), not just filtering after the fact", async () => {
+  const library = [
+    { id: "seed", artist: "Seed", title: "Origin", bpm: "120", key: "8A", genre: "hip hop", year: "2020", playcount: "5" },
+    { id: "liked", artist: "Liked", title: "Artist", bpm: "121", key: "8A", genre: "hip hop", year: "2020", playcount: "1" },
+    { id: "excluded", artist: "Excluded", title: "Artist", bpm: "119", key: "8A", genre: "hip hop", year: "2020", playcount: "1" }
+  ];
+  let capturedContent = null;
+  const capturingProvider = {
+    kind: "mock",
+    async call(body) {
+      capturedContent = body.messages[0].content;
+      return { content: [{ text: "[]" }] };
+    }
+  };
+  const app = buildApp({ devTokens: [DEV_TOKEN], provider: capturingProvider });
+  const session = await createSession(app);
+
+  await sendEventOk(app, session.sessionId, { type: "vote", trackId: "liked", value: "up", clientSeq: 1 });
+  await sendEventOk(app, session.sessionId, { type: "vote", trackId: "excluded", value: "down", clientSeq: 2 });
+  await recommend(app, { library, seedTrackId: "seed", sessionId: session.sessionId, clientSeq: 3 });
+
+  assert.ok(capturedContent, "expected the provider to have been called");
+  assert.ok(capturedContent.includes("Do NOT include:") && capturedContent.includes("Excluded - Artist"), "expected the down-voted track to appear in the Do NOT include list");
+  assert.ok(capturedContent.includes("DJ liked these:") && capturedContent.includes("Liked - Artist"), "expected the up-voted track to appear in the DJ liked these list");
+});

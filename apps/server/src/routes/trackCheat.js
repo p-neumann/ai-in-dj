@@ -30,8 +30,10 @@
 //
 // NOT YET PORTED (listed honestly rather than silently skipped):
 //   - "likedAsSeed" as its own trigger label - see sessionEvents.js header.
-//   - "Liked"/"ignored" prompt lines and overplayed-pairs note - these read
-//     vote/play history the server doesn't fold into prompts yet; always "".
+//   - "Ignored" prompt line and the overplayed-pairs note (both need new
+//     session concepts - per-track ignore counts, and play-sequence pair
+//     tracking - not just reusing session.votes the way "liked" does, see
+//     below) - always absent from the prompt for now.
 //   - fuzzyFind - bridge mode's old-seed lookup uses an exact id match only.
 //   - Do Not Play enforcement (R27) - sessionPrefs are stored but not yet
 //     applied as a filter; that's an open question for Mike either way.
@@ -57,12 +59,19 @@ import { getSession } from "../session/sessionStore.js";
 
 export class ValidationError extends Error {}
 
-function buildRequestBody(seedName, ctx, system) {
+function buildRequestBody(seedName, ctx, system, allEx, likedNames) {
   const seedTitleWords = seedName.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
     .trim().split(" ").filter((w) => w.length > 2).slice(0, 3);
   const seedExcludeNote = seedTitleWords.length
     ? "\nNEVER return any track whose title contains: " + seedTitleWords.join(", ") + ". This includes all remixes, edits, intros, or versions of the seed song."
     : "";
+  // exN: tells the MODEL what to avoid, on top of (not instead of) the hard
+  // post-filter in resolveRes/injectGenreDiversity/injectTypeLockBalance -
+  // steers generation away from excluded tracks instead of relying purely
+  // on filtering them out after the fact. Was missing from this port
+  // entirely until caught while wiring the liked-tracks line below.
+  const exN = allEx && allEx.length ? "\nDo NOT include:\n" + allEx.join("\n") : "";
+  const likedN = likedNames && likedNames.length ? "\nDJ liked these:\n" + likedNames.join("\n") : "";
   return {
     model: "claude-sonnet-5",
     max_tokens: 2000,
@@ -70,14 +79,14 @@ function buildRequestBody(seedName, ctx, system) {
     messages: [{
       role: "user",
       content: "Seed: " + seedName + "\nLibrary:\n" + ctx.context +
-        "\nReturn JSON array of 20 tracks." + seedExcludeNote +
-        "\nHARD RULES:\n1. Every result must be a DIFFERENT song title — never return two versions or remixes of the same song.\n2. Never return any version of the seed track.\n3. Return exactly 20 different song titles."
+        "\nReturn JSON array of 20 tracks." + exN + seedExcludeNote +
+        "\nHARD RULES:\n1. Every result must be a DIFFERENT song title — never return two versions or remixes of the same song.\n2. Never return any version of the seed track.\n3. Return exactly 20 different song titles." + likedN
     }]
   };
 }
 
-async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effectiveRange, allEx, playedNames) {
-  const requestBody = buildRequestBody(seedName, ctx, system);
+async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effectiveRange, allEx, playedNames, likedNames) {
+  const requestBody = buildRequestBody(seedName, ctx, system, allEx, likedNames);
   const response = await provider.call(requestBody);
   if (!response.content || !Array.isArray(response.content)) {
     throw new Error((response.error && response.error.message) || "Provider returned no content");
@@ -203,6 +212,10 @@ export async function recommendTrackCheat(request, provider) {
     ...(session ? namesFor(session.downvotedTrackIds) : [])
   ]));
   const playedNames = session ? namesFor(session.playedTrackIds) : [];
+  // "DJ liked these" prompt line (source doFetch ~L2558-2559): thumbs-up
+  // reuses the same session.votes Map handleVote already maintains.
+  const likedTrackIds = session ? Array.from(session.votes.entries()).filter(([, v]) => v === "up").map(([id]) => id) : [];
+  const likedNames = namesFor(new Set(likedTrackIds));
 
   const prefs = { styleProfile, styleProfileEnrichment, playCountMode };
 
@@ -241,7 +254,7 @@ export async function recommendTrackCheat(request, provider) {
   try {
     const ctx1 = buildCtxFor(true, false, vibe > 0);
     candidatePoolSize = ctx1.indexed.length;
-    resolved = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, playedNames);
+    resolved = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, playedNames, likedNames);
     resolved = applyGenreWall(resolved, seedGenre, currentVibe);
     resolved = applyGenderFilter(resolved, seedGender, currentVibe);
     resolved = injectGenreDiversity(resolved, ctx1.indexed, seedGenre, currentVibe, effectiveRange, allEx, seedName);
@@ -255,7 +268,7 @@ export async function recommendTrackCheat(request, provider) {
       fallbackDepth = 1;
       try {
         const ctx2 = buildCtxFor(true, true, undefined);
-        let resolved2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, playedNames);
+        let resolved2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, playedNames, likedNames);
         resolved2 = applyGenreWall(resolved2, seedGenre, currentVibe);
         resolved2 = applyGenderFilter(resolved2, seedGender, currentVibe);
         resolved2 = applyTypeLock(resolved2, trackTypeLock);
@@ -268,7 +281,7 @@ export async function recommendTrackCheat(request, provider) {
           const looserVibe = Math.min(currentVibe + 2, 0);
           try {
             const ctx3 = buildCtxFor(true, true, undefined);
-            let resolved3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, playedNames);
+            let resolved3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, playedNames, likedNames);
             resolved3 = applyGenreWall(resolved3, seedGenre, looserVibe);
             resolved3 = applyGenderFilter(resolved3, seedGender, looserVibe);
             resolved3 = applyTypeLock(resolved3, trackTypeLock);
