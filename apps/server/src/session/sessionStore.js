@@ -43,6 +43,16 @@ export function createSession() {
     manualRetryCount: 0,
     pendingManualRetry: false, // one-shot, consumed by the next recommend
 
+    // Drag lean (CLAUDE.md R6/4.4): raw {trackId,atFetch} entries, capped
+    // at 30 (source: dragLeanRef). Genre can't be resolved here (no
+    // library access in sessionEvents.js) - trackCheat.js resolves each
+    // trackId against the current request's library right before calling
+    // engine/dragLean.js's computeDragLean, matching the source's own
+    // `if(dragGenre)` guard (an entry for a track with no genre tag is
+    // simply never useful, same effect either way).
+    dragLeanEntries: [],
+    trackCheatFetchCount: 0, // source: trackCheatFetchCountRef, ticks once per doFetch call incl. R28 retries
+
     // Three distinct exclusion mechanisms, traced from the source
     // (fetchBangerResults ~L3513-3528, resolveRes ~L1996-2021, handleVote
     // ~L2461-2464) and kept separate because their add/remove rules and

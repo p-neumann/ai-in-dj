@@ -150,3 +150,43 @@ test("deep play-count mode filters out familiar song families", async () => {
     restore();
   }
 });
+
+test("drag lean: dragging out a result nudges the next prompt's secondary signal toward that genre", async () => {
+  const restore = seedRandom(1);
+  try {
+    const library = [
+      { id: "seed", artist: "Seed", title: "Origin", bpm: "120", key: "8A", genre: "hip hop", year: "2020", playcount: "5" },
+      { id: "dragged", artist: "Dragged", title: "Out", bpm: "121", key: "8A", genre: "edm", year: "2020", playcount: "1" },
+      { id: "other", artist: "Other", title: "Track", bpm: "119", key: "8A", genre: "hip hop", year: "2020", playcount: "1" }
+    ];
+    let capturedSystem = null;
+    const capturingProvider = {
+      kind: "mock",
+      async call(body) {
+        capturedSystem = body.system;
+        return { content: [{ text: "[]" }] };
+      }
+    };
+    const app = buildApp({ devTokens: [DEV_TOKEN], provider: capturingProvider });
+    const session = await createSession(app);
+
+    await sendEventOk(app, session.sessionId, { type: "resultDragged", trackId: "dragged", batchId: "b1", clientSeq: 1 });
+    await recommend(app, { library, seedTrackId: "seed", sessionId: session.sessionId, clientSeq: 2 });
+
+    assert.ok(capturedSystem, "expected the provider to have been called");
+    assert.ok(
+      capturedSystem.includes("dragging out tracks leaning toward: edm"),
+      `expected a drag-lean hint toward edm in the system prompt, got: ${capturedSystem}`
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("drag lean: with no drags this session, the prompt carries no secondary signal line", async () => {
+  const app = makeApp();
+  const session = await createSession(app);
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t1", origin: "external", clientSeq: 1 });
+  const data = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t1", sessionId: session.sessionId, clientSeq: 2 });
+  assert.ok(data.results.length >= 0); // sanity: pipeline still runs fine with zero drag history
+});

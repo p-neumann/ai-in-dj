@@ -108,6 +108,10 @@ function handleResultDragged(session, event) {
   // distinct from shownTrackIds (exact match, populated by every shown
   // batch regardless of whether anything was dragged).
   session.playedTrackIds.add(event.trackId);
+  // Drag lean (R6): capped at the last 30 entries, same as the source.
+  session.dragLeanEntries = session.dragLeanEntries
+    .concat([{ trackId: event.trackId, atFetch: session.trackCheatFetchCount }])
+    .slice(-30);
   return { accepted: true };
 }
 

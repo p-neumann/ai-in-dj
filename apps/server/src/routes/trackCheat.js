@@ -30,7 +30,6 @@
 //
 // NOT YET PORTED (listed honestly rather than silently skipped):
 //   - "likedAsSeed" as its own trigger label - see sessionEvents.js header.
-//   - Drag lean (computeDragLean) - dragLeanHint is always "".
 //   - "Liked"/"ignored" prompt lines and overplayed-pairs note - these read
 //     vote/play history the server doesn't fold into prompts yet; always "".
 //   - fuzzyFind - bridge mode's old-seed lookup uses an exact id match only.
@@ -38,6 +37,7 @@
 //     applied as a filter; that's an open question for Mike either way.
 
 import { buildSmartCtx } from "../engine/candidateSelection.js";
+import { computeDragLean } from "../engine/dragLean.js";
 import { resolveRes } from "../engine/resolveResults.js";
 import { applyGenreWall, applyGenderFilter, injectGenreDiversity } from "../engine/postProcessing.js";
 import { sortByKeyCompatibility } from "../engine/keyCompatibility.js";
@@ -213,8 +213,24 @@ export async function recommendTrackCheat(request, provider) {
     return ctx;
   }
 
+  // R6/4.4: "one fetch-count tick per doFetch call, including internal
+  // auto-retries" (source comment, v1.0.17005) - ticks once per sys() call
+  // since sys() is invoked exactly once per doFetch-equivalent attempt
+  // below (fetch #1, and each R28 fallback). Genre is resolved from
+  // dragLeanEntries' trackIds against THIS request's library, since
+  // sessionEvents.js has no library access to resolve it at drag time.
+  function nextDragLeanHint() {
+    if (!session) return "";
+    session.trackCheatFetchCount += 1;
+    const resolvedEntries = session.dragLeanEntries.map((e) => {
+      const t = library.find((x) => x.id === e.trackId);
+      return { genre: t ? (t.genre || "") : "", atFetch: e.atFetch };
+    });
+    return computeDragLean(resolvedEntries, session.trackCheatFetchCount).hint;
+  }
+
   function sys(vibeForPrompt, isRetry, retryHint) {
-    return buildSys(bpmN, keyN, divPick(), vibeForPrompt, seedGenre, "", isRetry, yearNote, seedGender, retryHint, vibePromptText, bridgeInfo, driftInfo, vibeDriftInfo, "", trackTypeLock, genreIslandLock, prefs);
+    return buildSys(bpmN, keyN, divPick(), vibeForPrompt, seedGenre, "", isRetry, yearNote, seedGender, retryHint, vibePromptText, bridgeInfo, driftInfo, vibeDriftInfo, nextDragLeanHint(), trackTypeLock, genreIslandLock, prefs);
   }
 
   let resolved;
