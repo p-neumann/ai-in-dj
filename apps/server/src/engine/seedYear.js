@@ -1,18 +1,20 @@
 // Ported from reference/CheatCodeDJ_v_1_0_22016.sanitized.jsx
-// (source lines 3006-3025, resolveSeedYearAsync) - LOCAL-ONLY portion.
+// (source lines 3006-3025, resolveSeedYearAsync).
 //
-// SCOPE NOTE (honest, not a shortcut): the source falls back to an AI call
-// (resolveSeedYearFromKnowledge) when no local signal exists at all. That
-// call is not ported here - adding it means another provider round-trip to
-// orchestrate, and CLAUDE.md's instruction not to require a real key for
-// what doesn't need one applies just as much to new server code as to
-// tests. When no local year signal exists, this returns 0 (unknown) rather
-// than guessing via a model call; strictEra/year-note behavior degrades
-// gracefully (CLAUDE.md's own getYearInstruction already has an "unknown
-// year" wording path for exactly this case).
+// resolveSeedYearLocal covers the no-network part (seed.year, inferArtistEra
+// keyword table, library artist-year median). resolveSeedYear adds the
+// source's own AI-knowledge fallback (resolveSeedYearFromKnowledge,
+// knowledgeCalls.js) for when none of that local data exists - previously
+// deferred (see git history), now wired since it's a small, self-contained
+// call like the other knowledgeCalls.js functions. It only fires when
+// resolveSeedYearLocal genuinely found nothing, so the common case (a
+// library with real year tags) never touches the provider at all - with
+// the mock provider (the default everywhere in this codebase) this is
+// free and instant either way.
 
 import { getArtistTitle, getDisplayName } from "./trackNames.js";
 import { inferArtistEra } from "./artistLookup.js";
+import { resolveSeedYearFromKnowledge } from "./knowledgeCalls.js";
 
 export function resolveSeedYearLocal(seedTrack, seedName, library) {
   var seedYear = seedTrack ? parseInt(seedTrack.year || 0) : 0;
@@ -32,4 +34,10 @@ export function resolveSeedYearLocal(seedTrack, seedName, library) {
     }
   }
   return seedYear || 0;
+}
+
+export async function resolveSeedYear(seedTrack, seedName, library, provider) {
+  const local = resolveSeedYearLocal(seedTrack, seedName, library);
+  if (local) return local;
+  return resolveSeedYearFromKnowledge(seedName, provider);
 }

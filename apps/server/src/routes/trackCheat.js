@@ -33,8 +33,6 @@
 //   - Drag lean (computeDragLean) - dragLeanHint is always "".
 //   - "Liked"/"ignored" prompt lines and overplayed-pairs note - these read
 //     vote/play history the server doesn't fold into prompts yet; always "".
-//   - resolveSeedYearAsync's AI-knowledge fallback - only the local
-//     (no-network) part is ported (seedYear.js); unknown stays unknown.
 //   - fuzzyFind - bridge mode's old-seed lookup uses an exact id match only.
 //   - Do Not Play enforcement (R27) - sessionPrefs are stored but not yet
 //     applied as a filter; that's an open question for Mike either way.
@@ -48,7 +46,7 @@ import { inferGenreLocal, inferArtistGender } from "../engine/artistLookup.js";
 import { getBpmRange, getYearInstruction } from "../engine/vibe.js";
 import { compatibleKeys } from "../engine/keyCompatibility.js";
 import { buildSys, divPick } from "../engine/promptBuilder.js";
-import { resolveSeedYearLocal } from "../engine/seedYear.js";
+import { resolveSeedYear } from "../engine/seedYear.js";
 import { parseJSON } from "../engine/parsing.js";
 import { isFamiliarSongFamily } from "../engine/playCountMode.js";
 import {
@@ -162,7 +160,7 @@ export async function recommendTrackCheat(request, provider) {
 
   const genreIslandLock = detectGenreIslandLock(trackTypeLock, seedGenre, currentVibe);
 
-  const seedYear = resolveSeedYearLocal(seedTrack, seedName, library);
+  const seedYear = await resolveSeedYear(seedTrack, seedName, library, provider);
   const strictEra = currentVibe <= -3 && seedYear > 0;
   const yearNote = getYearInstruction(seedYear ? String(seedYear) : "", seedName, currentVibe);
 
