@@ -6,17 +6,9 @@
 import { getDisplayName, isSameSong } from "./trackNames.js";
 import { getAdjacentGenresAtTier } from "./genre.js";
 import { getGenreTier } from "./vibe.js";
+import { shuffleArr } from "./shuffleArr.js";
 
 const CONTENT_KEYWORD_STOPWORDS = ["the","and","for","with","some","need","needs","tracks","track","remix","remixes","only","give","gimme","any","want","wanna","like","please","help","build","playlist","songs","song","music","vibe","vibes","turn","dj","set","party","bangers","banger","hits","hit","ideas","idea","good","great","best","more","less","new","old","have","has","get","got","really","just","kind","kinda","that","this","those","these","from","about","into","out","not","but","are","was","were","would","could","should","can","will","play","playing","let","lets"];
-
-function shuffleArr(arr) {
-  var a = arr.slice();
-  for (var i = a.length - 1; i > 0; i--) {
-    var j = Math.floor(Math.random() * (i + 1));
-    var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
-  }
-  return a;
-}
 
 export function getEditDescriptor(name) {
   var s = (name || "").replace(/\s*-\s*(dirty|clean|explicit|radio|instrumental)\s*$/i, "").trim();
