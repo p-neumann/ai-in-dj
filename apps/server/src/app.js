@@ -8,6 +8,7 @@ import Fastify from "fastify";
 import { checkDevToken } from "./auth/devToken.js";
 import { recommendTrackCheat, ValidationError } from "./routes/trackCheat.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerCrateRoutes } from "./routes/crates.js";
 import { createMockProvider } from "./providers/mockProvider.js";
 
 // config: { devTokens: string[], provider: {call} }
@@ -29,6 +30,7 @@ export function buildApp(config = {}) {
   });
 
   registerSessionRoutes(app);
+  registerCrateRoutes(app, provider);
 
   app.post("/v1/track-cheat/recommend", async (request, reply) => {
     try {

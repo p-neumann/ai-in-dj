@@ -93,6 +93,13 @@ export function createSession() {
     doPlay: [],
     doNotPlay: [],
 
+    // Crate Cheat per-prompt staleness (source: crateShownTracks state,
+    // v1.0.14012/16002). Keyed by "v1:"+prompt.slice(0,100) -> a plain
+    // object map of {location-or-displayName: true}. Reset to {} once a
+    // given prompt key accumulates CRATE_STALE_CAP (100) entries (source:
+    // resetIfOverCap) rather than growing forever.
+    crateShownTracks: {},
+
     cache: new Map(), // R13
 
     idempotency: new Map() // idempotencyKey -> stored event response
