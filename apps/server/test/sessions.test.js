@@ -218,57 +218,92 @@ test("shown-exclusion and thumbs-down exclusion are independent: un-voting doesn
   }
 });
 
-test("shown-exclusion caps at the most recently shown 20, matching the prototype's own bangerExcluded usage (not R12's uncapped rule, which is thumbs-down only)", async () => {
-  const restore = seedRandom(1);
-  try {
-    const app = makeApp();
-    const n = 30;
-    const library = [
-      { id: "seed", artist: "Seed", title: "Origin", bpm: "120", key: "8A", genre: "edm", year: "2020", playcount: "5" },
-      ...Array.from({ length: n }, (_, i) => ({
-        id: "t" + String(i).padStart(2, "0"),
-        artist: "Artist " + String(i).padStart(2, "0"),
-        title: "TrackQ" + String(i).padStart(2, "0"),
-        bpm: String(120 + (i % 6)),
-        key: "8A",
-        genre: "edm",
-        year: "2020",
-        playcount: "1"
-      }))
-    ];
-
-    const session = await createSession(app);
-    let clientSeq = 1;
-    const batches = [];
-    for (let call = 0; call < 4; call++) {
-      await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "seed", origin: "search", clientSeq: clientSeq++ });
-      const r = await recommendOk(app, { library, seedTrackId: "seed", sessionId: session.sessionId, clientSeq: clientSeq++ });
-      batches.push(r.results.map((x) => x.trackId));
+// This test previously drove the shared shuffle-dependent mock provider
+// (src/providers/mockProvider.js) through four real recommend calls and
+// asserted exact, hand-observed batch sizes/order "deterministic under
+// this seed." That coupling turned out to be fragile to something
+// entirely unrelated to this test's own subject: buildSmartCtx's
+// candidate shuffle (engine/candidateSelection.js, `.sort(() => Math.random()
+// - 0.5)`) produces a different result depending on how many OTHER routes
+// are registered on the Fastify app - confirmed by direct experiment
+// (reverting Crate Cheat's route registration made the original assertions
+// pass again; re-adding even a one-line unrelated no-op POST route
+// reproduced the failure with identical output). That's a real, separate
+// engine-robustness finding (see docs/QUESTIONS.md), but this test's own
+// job is to verify the 20-item exclusion CAP (R12/bangerExcluded parity),
+// not to pin down buildSmartCtx's shuffle output. Fixed by using a
+// provider that answers deterministically from the actual exclusion
+// instructions the server sent it (the "Do NOT include:" list - the same
+// mechanism a real model is asked to honor) instead of depending on
+// candidate shuffle order or the shared mock's incidental 12-candidate cap.
+function makeDeterministicOrderedProvider() {
+  return {
+    kind: "mock",
+    async call(requestBody) {
+      const userContent = requestBody.messages[0].content;
+      const excludedMatch = userContent.match(/Do NOT include:\n([\s\S]*?)(?:\nNEVER return|\nHARD RULES|\nDJ liked these:|$)/);
+      const excludedNames = excludedMatch ? new Set(excludedMatch[1].split("\n").filter(Boolean)) : new Set();
+      const candidates = [];
+      for (const line of userContent.split("\n")) {
+        const m = line.match(/^(\d+)\|([^|]*)\|([^|]*)\|([^|]*)\|/);
+        if (m) candidates.push({ id: Number(m[1]), name: m[2], bpm: m[3], key: m[4] });
+      }
+      // Sort by NAME, not by the positional `id` column - that column is
+      // the candidate's shuffled position in context, which is exactly
+      // the source of fragility this provider exists to avoid depending
+      // on. Names are zero-padded ("Artist 00".."Artist 29"), so
+      // lexicographic order is numeric order.
+      const chosen = candidates
+        .filter((c) => !excludedNames.has(c.name))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        .slice(0, 20);
+      return { content: [{ text: JSON.stringify(chosen) }] };
     }
+  };
+}
 
-    // Deterministic under this seed (verified while writing this test):
-    // batch1 (10) + batch2 (10) = 20 shown, exactly at the cap boundary -
-    // batch2 has zero overlap with batch1 (nothing old enough to repeat yet).
-    assert.equal(batches[0].length, 10);
-    assert.equal(batches[1].length, 10);
-    assert.equal(batches[0].filter((id) => batches[1].includes(id)).length, 0);
+test("shown-exclusion caps at the most recently shown 20, matching the prototype's own bangerExcluded usage (not R12's uncapped rule, which is thumbs-down only)", async () => {
+  const app = buildApp({ devTokens: [DEV_TOKEN], provider: makeDeterministicOrderedProvider() });
+  const n = 30;
+  const library = [
+    { id: "seed", artist: "Seed", title: "Origin", bpm: "120", key: "8A", genre: "edm", year: "2020", playcount: "5" },
+    ...Array.from({ length: n }, (_, i) => ({
+      id: "t" + String(i).padStart(2, "0"),
+      artist: "Artist " + String(i).padStart(2, "0"),
+      title: "TrackQ" + String(i).padStart(2, "0"),
+      bpm: String(120 + (i % 6)),
+      key: "8A",
+      genre: "edm",
+      year: "2020",
+      playcount: "1"
+    }))
+  ];
 
-    // batch3 pushes cumulative shown to 24 - still entirely new tracks.
-    assert.equal(batches[2].length, 4);
-    assert.equal(batches[2].filter((id) => [...batches[0], ...batches[1]].includes(id)).length, 0);
-
-    // batch4: the window (last 20 of 24 shown) now excludes only
-    // batches[1]+batches[2]+the LAST 6 of batches[0] - the first 4 tracks
-    // ever shown (batches[0]'s earliest 4, by insertion order) have aged
-    // out of the cap and are eligible again. With the fresh pool now
-    // exhausted (30 tracks - 1 seed - 24 already shown = 5 left, and this
-    // run's candidate selection didn't surface those 5 here), the engine
-    // reaches back to exactly those 4 re-eligible tracks.
-    assert.deepEqual(batches[3], batches[0].slice(0, 4), "the earliest-shown tracks must reappear once they age out of the 20-item window");
-
-    const raw = getSession(session.sessionId);
-    assert.ok(raw.shownTrackIds.size >= 24, "the underlying shown set itself keeps growing unbounded, same as the source's bangerExcluded state - only what's ENFORCED per request is capped");
-  } finally {
-    restore();
+  const session = await createSession(app);
+  let clientSeq = 1;
+  const batches = [];
+  for (let call = 0; call < 4; call++) {
+    await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "seed", origin: "search", clientSeq: clientSeq++ });
+    const r = await recommendOk(app, { library, seedTrackId: "seed", sessionId: session.sessionId, clientSeq: clientSeq++ });
+    batches.push(r.results.map((x) => x.trackId));
   }
+
+  // 30 fresh tracks, 10 shown per call (R5's "target 10"): calls 1-3 each
+  // draw an entirely fresh group of 10 (0 shown so far -> group A; 10 shown
+  // -> group B; 20 shown -> group C), with zero overlap between any two.
+  assert.equal(batches[0].length, 10);
+  assert.equal(batches[1].length, 10);
+  assert.equal(batches[2].length, 10);
+  assert.equal(new Set([...batches[0], ...batches[1], ...batches[2]]).size, 30, "three calls of 10 fresh tracks each must cover the library with no repeats");
+
+  // Call 4: 30 shown total now, but only the most RECENT 20 (calls 2+3,
+  // i.e. groups B+C) are enforced as the hard exclusion - group A (call
+  // 1's 10) aged out of the 20-item window and is eligible again. Since
+  // group A is now the ONLY eligible content, call 4 must reproduce it
+  // exactly (same 10 tracks; same BPM-tiebreak order, since the same ids
+  // feed the same final `resolveRes` BPM sort both times).
+  assert.deepEqual(batches[3], batches[0], "the earliest-shown group must reappear, in the same order, once it ages out of the 20-item window");
+
+  const raw = getSession(session.sessionId);
+  assert.ok(raw.shownTrackIds.size >= 30, "the underlying shown set itself keeps growing unbounded, same as the source's bangerExcluded state - only what's ENFORCED per request is capped");
 });
