@@ -90,8 +90,19 @@ export function createSession() {
     playedTrackIds: new Set(),
     votes: new Map(), // trackId -> "up" | "down"
 
+    // Permanent preferences (CLAUDE.md Section 6.4: PUT /v1/preferences).
+    // No per-user account/DB store exists yet (that's Phase 6) - these live
+    // on the session for now, which is a known, documented simplification
+    // (session-scoped "permanent" prefs outlive a single recommend/build
+    // call but not the server process). The session-only doPlay/doNotPlay
+    // set via the `sessionPrefs` event (sessionEvents.js) currently writes
+    // these SAME fields wholesale, matching that handler's pre-existing
+    // (Phase 4a) behavior - a real session-vs-permanent split needs the
+    // Phase 6 persistence layer to mean anything durable.
     doPlay: [],
     doNotPlay: [],
+    styleProfile: "",
+    styleProfileEnrichment: null,
 
     // Crate Cheat per-prompt staleness (source: crateShownTracks state,
     // v1.0.14012/16002). Keyed by "v1:"+prompt.slice(0,100) -> a plain

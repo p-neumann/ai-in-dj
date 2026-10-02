@@ -102,7 +102,7 @@ function makeBatchId() {
 export async function recommendTrackCheat(request, provider) {
   const {
     library, seedTrackId, vibe = -3, energy = 0, exclude = [],
-    playCountMode = "mix", styleProfile = "", styleProfileEnrichment = null,
+    playCountMode = "mix", styleProfile: requestStyleProfile = null, styleProfileEnrichment: requestStyleProfileEnrichment = null,
     vibePromptText = "", sessionId = null, clientSeq = null, expectedStateVersion = null
   } = request;
 
@@ -131,6 +131,14 @@ export async function recommendTrackCheat(request, provider) {
       };
     }
   }
+
+  // CLAUDE.md Section 6.4: PUT /v1/preferences stores permanent prefs on
+  // the session (routes/preferences.js); a request's own fields still win
+  // when explicitly supplied (e.g. a one-off override), matching the
+  // source's own "request field overrides stored preference" precedent
+  // (crateVibePrompt vs styleProfile in buildCrate).
+  const styleProfile = requestStyleProfile !== null ? requestStyleProfile : (session ? session.styleProfile : "") || "";
+  const styleProfileEnrichment = requestStyleProfileEnrichment !== null ? requestStyleProfileEnrichment : (session ? session.styleProfileEnrichment : null);
 
   const seedName = getDisplayName(seedTrack);
   const seedGenre = (seedTrack.genre && seedTrack.genre.trim()) || inferGenreLocal(seedName) || "";

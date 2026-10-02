@@ -5,12 +5,13 @@
 // engine errors to the documented error codes (Section 6.3).
 //
 // `size` is the wire name for what the engine calls `playlistSize`
-// (matches CLAUDE.md's own POST /v1/crates/build example body). doPlayList/
-// doNotPlayList/styleProfile/styleProfileEnrichment are accepted directly
-// on the request for now (no account/preferences store exists yet - PUT
-// /v1/preferences is not built in this phase); when a sessionId is given
-// and the request omits doPlayList/doNotPlayList, the session's own
-// sessionPrefs (set via the event API) are used instead.
+// (matches CLAUDE.md's own POST /v1/crates/build example body).
+// doPlayList/doNotPlayList/styleProfile/styleProfileEnrichment may be
+// supplied directly on the request as a one-off override; when omitted
+// (not merely falsy - an explicit empty string/array still wins) and a
+// sessionId is given, the session's own stored preferences are used
+// instead (doPlay/doNotPlay via the `sessionPrefs` event, styleProfile/
+// styleProfileEnrichment via PUT /v1/preferences - routes/preferences.js).
 
 import { buildCrate, ValidationError, RequestTooLargeError } from "../engine/crateOrchestration.js";
 import { getSession } from "../session/sessionStore.js";
@@ -41,11 +42,11 @@ export function registerCrateRoutes(app, provider) {
       prompt: body.prompt,
       playlistSize: body.size,
       crateVibePrompt: body.crateVibePrompt || "",
-      styleProfile: body.styleProfile || "",
-      styleProfileEnrichment: body.styleProfileEnrichment || null,
+      styleProfile: body.styleProfile !== undefined ? body.styleProfile : ((session ? session.styleProfile : "") || ""),
+      styleProfileEnrichment: body.styleProfileEnrichment !== undefined ? body.styleProfileEnrichment : ((session ? session.styleProfileEnrichment : null) || null),
       playCountMode: body.playCountMode || "mix",
-      doPlayList: body.doPlayList || (session ? session.doPlay : []) || [],
-      doNotPlayList: body.doNotPlayList || (session ? session.doNotPlay : []) || [],
+      doPlayList: body.doPlayList !== undefined ? body.doPlayList : ((session ? session.doPlay : []) || []),
+      doNotPlayList: body.doNotPlayList !== undefined ? body.doNotPlayList : ((session ? session.doNotPlay : []) || []),
       vibeOffset: body.vibeOffset || 0,
       shownSet
     };
