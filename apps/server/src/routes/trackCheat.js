@@ -50,6 +50,7 @@ import { compatibleKeys } from "../engine/keyCompatibility.js";
 import { buildSys, divPick } from "../engine/promptBuilder.js";
 import { resolveSeedYear } from "../engine/seedYear.js";
 import { parseJSON } from "../engine/parsing.js";
+import { ProviderError } from "../providers/providerErrors.js";
 import { isFamiliarSongFamily } from "../engine/playCountMode.js";
 import {
   detectStyleTypeLock, detectGenreIslandLock, mergeTypeLockIntoCtx,
@@ -89,9 +90,14 @@ async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effe
   const requestBody = buildRequestBody(seedName, ctx, system, allEx, likedNames);
   const response = await provider.call(requestBody);
   if (!response.content || !Array.isArray(response.content)) {
-    throw new Error((response.error && response.error.message) || "Provider returned no content");
+    throw new ProviderError((response.error && response.error.message) || "Provider returned no content", "PROVIDER_ERROR");
   }
-  const rawResults = parseJSON(response.content.map((b) => b.text || "").join(""));
+  let rawResults;
+  try {
+    rawResults = parseJSON(response.content.map((b) => b.text || "").join(""));
+  } catch (parseErr) {
+    throw new ProviderError("Model response was not valid JSON: " + parseErr.message, "MODEL_OUTPUT_INVALID");
+  }
   return resolveRes(rawResults, ctx.indexed, seedName, ctx.seedGenre, vibeForSort > 0, effectiveRange, allEx, playedNames);
 }
 

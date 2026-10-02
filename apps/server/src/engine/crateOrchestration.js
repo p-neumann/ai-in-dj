@@ -38,6 +38,7 @@ import { getDisplayName, getRawTitleFromName, getArtistTitle } from "./trackName
 import { inferArtistEra } from "./artistLookup.js";
 import { shuffleArr } from "./shuffleArr.js";
 import { parseJSON } from "./parsing.js";
+import { ProviderError } from "../providers/providerErrors.js";
 import {
   GENRE_KEYWORDS_IN_PROMPT, ERA_KEYWORD_YEAR_RANGE,
   extractGenreFromPrompt, extractEraFromPrompt, extractBpmFromPrompt,
@@ -430,15 +431,17 @@ export async function runBuildCrateBody(input, provider) {
   const requestBody = { model: "claude-sonnet-5", max_tokens: dynamicMaxTokens, system: system, messages: [{ role: "user", content: userContent }] };
   const data = await provider.call(requestBody);
   if (!data.content || !Array.isArray(data.content)) {
-    throw new Error((data.error && data.error.message) || "API error");
+    throw new ProviderError((data.error && data.error.message) || "API error", "PROVIDER_ERROR");
   }
   if (data.stop_reason === "max_tokens") {
-    throw new Error("Response cut off — hit the token limit before finishing. Try a smaller track count.");
+    throw new ProviderError("Response cut off — hit the token limit before finishing. Try a smaller track count.", "MODEL_OUTPUT_INVALID");
   }
   const rawResponseText = data.content.map(function (b) { return b.text || ""; }).join("");
   let parsed;
   try { parsed = parseJSON(rawResponseText); }
-  catch (parseErr) { throw new Error("No JSON — model returned: \"" + rawResponseText.slice(0, 150).replace(/"/g, "'") + (rawResponseText.length > 150 ? "..." : "") + "\""); }
+  catch (parseErr) {
+    throw new ProviderError("No JSON — model returned: \"" + rawResponseText.slice(0, 150).replace(/"/g, "'") + (rawResponseText.length > 150 ? "..." : "") + "\"", "MODEL_OUTPUT_INVALID");
+  }
 
   let deduped = dedupeByRawTitle(parsed);
 

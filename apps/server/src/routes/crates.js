@@ -15,6 +15,7 @@
 
 import { buildCrate, ValidationError, RequestTooLargeError } from "../engine/crateOrchestration.js";
 import { getSession } from "../session/sessionStore.js";
+import { mapProviderError } from "../providers/providerErrors.js";
 
 const CRATE_STALE_CAP = 100;
 
@@ -72,8 +73,9 @@ export function registerCrateRoutes(app, provider) {
         return { ok: false, error: { code: "REQUEST_TOO_LARGE", message: err.message } };
       }
       request.log?.error?.(err);
-      reply.code(502);
-      return { ok: false, error: { code: "PROVIDER_ERROR", message: String(err.message || err) } };
+      const mapped = mapProviderError(err);
+      reply.code(mapped.httpStatus);
+      return { ok: false, error: { code: mapped.code, message: String(err.message || err), retryAfterMs: mapped.retryAfterMs } };
     }
   });
 }

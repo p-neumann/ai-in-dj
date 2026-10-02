@@ -8,6 +8,8 @@
 // `anthropic-version` header against Anthropic's current official API docs
 // (CLAUDE.md Top Rule 9).
 
+import { ProviderError } from "./providerErrors.js";
+
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01"; // verify against current docs
 
@@ -18,18 +20,40 @@ export function createAnthropicProvider(apiKey) {
   return {
     kind: "anthropic",
     async call(requestBody) {
-      const res = await fetch(ANTHROPIC_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": ANTHROPIC_VERSION
-        },
-        body: JSON.stringify(requestBody)
-      });
+      let res;
+      try {
+        res = await fetch(ANTHROPIC_URL, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": ANTHROPIC_VERSION
+          },
+          body: JSON.stringify(requestBody)
+        });
+      } catch (networkErr) {
+        throw new ProviderError("Network error calling Anthropic: " + networkErr.message, "PROVIDER_ERROR");
+      }
+      // CLAUDE.md Section 6.3's error codes distinguish RATE_LIMITED (429)
+      // and PROVIDER_OVERLOADED (529, Anthropic's own overload status)
+      // from a generic PROVIDER_ERROR - a client needs to know "wait and
+      // retry" from "something else broke". retry-after, when Anthropic
+      // sends it, is passed through so a caller can honor it.
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("retry-after");
+        throw new ProviderError("Rate limited by Anthropic", "RATE_LIMITED", {
+          status: 429, retryAfterMs: retryAfter ? Number(retryAfter) * 1000 : null
+        });
+      }
+      if (res.status === 529) {
+        throw new ProviderError("Anthropic is overloaded", "PROVIDER_OVERLOADED", { status: 529 });
+      }
+      if (!res.ok) {
+        throw new ProviderError("Anthropic API error (HTTP " + res.status + ")", "PROVIDER_ERROR", { status: res.status });
+      }
       const data = await res.json();
       if (!data.content || !Array.isArray(data.content)) {
-        throw new Error((data.error && data.error.message) || "Anthropic API error");
+        throw new ProviderError((data.error && data.error.message) || "Anthropic API error", "PROVIDER_ERROR");
       }
       return data;
     }

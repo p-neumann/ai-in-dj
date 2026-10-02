@@ -11,6 +11,7 @@ import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerCrateRoutes } from "./routes/crates.js";
 import { registerPreferencesRoutes } from "./routes/preferences.js";
 import { createMockProvider } from "./providers/mockProvider.js";
+import { mapProviderError } from "./providers/providerErrors.js";
 
 // config: { devTokens: string[], provider: {call} }
 // Defaults to the mock provider - callers must explicitly pass a real
@@ -44,8 +45,9 @@ export function buildApp(config = {}) {
         return { ok: false, error: { code: "VALIDATION", message: err.message } };
       }
       request.log?.error?.(err);
-      reply.code(502);
-      return { ok: false, error: { code: "PROVIDER_ERROR", message: String(err.message || err) } };
+      const mapped = mapProviderError(err);
+      reply.code(mapped.httpStatus);
+      return { ok: false, error: { code: mapped.code, message: String(err.message || err), retryAfterMs: mapped.retryAfterMs } };
     }
   });
 
