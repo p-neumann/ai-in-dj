@@ -487,6 +487,11 @@ export async function runBuildCrateBody(input, provider) {
   deduped = applyDoPlayBoost(deduped, doPlayList);
   deduped = deduped.slice(0, playlistSize);
 
+  // Library-first guarantee: every result must map to a real track that
+  // was actually IN the candidate pool sent to the model - an id outside
+  // ctx.indexed's range (or any id the pool-building code never assigned)
+  // is dropped, never trusted or invented from the model's own text.
+  const seenTrackIds = new Set();
   const results = deduped.map(function (t) {
     const entry = t.id >= 0 ? ctx.indexed[t.id] : null;
     const libTrack = entry ? entry.track : (t._libTrack || null);
@@ -496,7 +501,17 @@ export async function runBuildCrateBody(input, provider) {
       bpm: t.bpm,
       key: t.key
     };
-  }).filter(function (r) { return r.trackId !== null; });
+  }).filter(function (r) {
+    if (r.trackId === null) return false;
+    // Belt-and-suspenders beyond the earlier raw-title dedup (which keys
+    // off the MODEL's own name text): if two returned entries resolve to
+    // the same real library track by id - whatever text the model
+    // attached to each - only the first survives. A crate must never
+    // contain the same real track twice.
+    if (seenTrackIds.has(r.trackId)) return false;
+    seenTrackIds.add(r.trackId);
+    return true;
+  });
 
   let shortfallReason = null;
   if (results.length < playlistSize) {
