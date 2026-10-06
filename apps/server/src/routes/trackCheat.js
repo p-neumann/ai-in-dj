@@ -75,7 +75,18 @@ function buildRequestBody(seedName, ctx, system, allEx, likedNames) {
   const likedN = likedNames && likedNames.length ? "\nDJ liked these:\n" + likedNames.join("\n") : "";
   return {
     model: "claude-sonnet-5",
-    max_tokens: 2000,
+    // Was 2000 (a prototype-era literal from before this model's default
+    // "thinking" behavior existed). On Claude Sonnet 5, thinking is on by
+    // default and bills against this SAME ceiling as the actual answer -
+    // confirmed directly on two real, back-to-back calls (2026-10-06,
+    // docs/decisions/0006): the model used 1999 of 2000 tokens on thinking
+    // alone, leaving none to write the answer, so the call failed outright.
+    // 6000 leaves ~4000 tokens of headroom beyond that observed worst case,
+    // comfortably covering the actual answer (a 20-track JSON array needs
+    // only ~400-500 tokens) with room to spare - this changes ONLY how much
+    // space the model is given to respond, never what it's asked for or
+    // how results are selected/ranked.
+    max_tokens: 6000,
     system,
     messages: [{
       role: "user",
