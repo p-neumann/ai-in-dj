@@ -1,0 +1,141 @@
+:root {
+  --bg: #11161a;
+  --surface: #191f25;
+  --ink: #e7edf1;
+  --ink-2: #bcc7d1;
+  --muted: #8d9aa7;
+  --line: #2a333c;
+  --accent: #46c0d0;
+  --ok: #6cc08c;
+  --bad: #ec8276;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 48px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.lede {
+  margin: 0;
+  color: var(--ink-2);
+  max-width: 46ch;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  padding: 20px 22px;
+}
+
+.panel--bad {
+  border-left-color: var(--bad);
+}
+
+.panel h2 {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.verdict {
+  margin-left: auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.panel li {
+  display: grid;
+  grid-template-columns: 1.2rem 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.mark {
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+li.ok .mark {
+  color: var(--ok);
+}
+
+li.bad .mark {
+  color: var(--bad);
+}
+
+.panel b {
+  display: block;
+  font-weight: 600;
+  font-size: 0.94rem;
+}
+
+.panel em {
+  display: block;
+  font-style: normal;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.foot {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.86em;
+  color: var(--ink-2);
+}

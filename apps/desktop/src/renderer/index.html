@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CheatCode DJ</title>
+
+    <!--
+      DEVELOPMENT Content-Security-Policy.
+      'unsafe-inline' and 'unsafe-eval' are here only because Vite's dev server
+      and HMR need them. CLAUDE.md Section 7.5 requires a strict CSP in the
+      shipped app, so before Phase 10 this must drop both, and connect-src must
+      name the CCDJ backend explicitly rather than allowing localhost.
+      Tracked as part of the Section 11.3 packaged-app exclusion check.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://localhost:* http://localhost:*"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
