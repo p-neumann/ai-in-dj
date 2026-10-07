@@ -12,4 +12,4 @@ The prototype is already React, so the renderer can reuse its logic with minimal
 
 ## Consequences
 - Phase 3-5 scaffolding (server, desktop shell) proceeds using this stack.
-- If Ranjish or the team wants a different stack, say so before much Phase 3/5 code is written - changing later means redoing scaffolding, not just this record.
+- If team wants a different stack, say so before much Phase 3/5 code is written - changing later means redoing scaffolding, not just this record.
