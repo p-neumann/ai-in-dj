@@ -1,14 +1,35 @@
-// CCDJ desktop - preload (Phase 5, step 1).
+// CCDJ desktop - preload.
 //
 // The only channel the renderer has into the main process (CLAUDE.md
 // Section 7.5): expose ONLY named, validated functions - never generic
-// file access, never raw paths from the renderer. Nothing is exposed yet;
-// that comes with step 4 (the real IPC functions), once there's something
-// real (a database, a library) on the other end of the bridge to call.
+// file access, never raw paths from the renderer.
+//
+// Step 3 exposes its first two real functions: importing a library CSV,
+// and asking what's already saved (so a restart shows the existing
+// library instead of looking empty until the DJ re-imports it).
 
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
-const api = {};
+export interface LibraryImportResult {
+  cancelled: boolean;
+  imported?: number;
+  blankLinesSkipped?: number;
+  rowsNeedingAttention?: number;
+  totalRows?: number;
+  sampleNames?: string[];
+}
+
+export interface LibraryStatus {
+  count: number;
+  sampleNames: string[];
+}
+
+const api = {
+  library: {
+    importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
+    getStatus: (): Promise<LibraryStatus> => ipcRenderer.invoke("library:getStatus")
+  }
+};
 
 if (process.contextIsolated) {
   try {

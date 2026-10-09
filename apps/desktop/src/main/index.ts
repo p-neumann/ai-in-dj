@@ -4,15 +4,17 @@
 // files, a real database, Serato - per CLAUDE.md Section 5.6.
 //
 // Step 1 (done): a window that opens safely (Section 7.5 hardening).
-// Step 2 (this file now): a real, permanent local database, proven by the
-// window remembering its own size/position across restarts - CLAUDE.md's
-// own Phase 5 "Expected result": "restart keeps ... window bounds."
+// Step 2 (done): a real, permanent local database, proven by the window
+// remembering its own size/position across restarts.
+// Step 3 (this file now): real library import, triggered via one narrow
+// IPC function (ipc.ts) - the only piece of step 4 pulled forward early.
 
 import { app, BrowserWindow, shell } from "electron";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { openDatabase } from "./db/openDatabase.ts";
 import { getWindowBounds, saveWindowBounds } from "./db/windowBounds.ts";
+import { registerLibraryIpc } from "./ipc.ts";
 
 // Provisional defaults until Mike confirms D7 (CLAUDE.md 8.2 - "label any
 // number you pick as provisional"). Only used when nothing's been saved yet.
@@ -82,6 +84,7 @@ app.whenReady().then(() => {
     console.warn(`Database at ${dbPath} was damaged and has been reset. The old file was kept at: ${opened.backupPath}`);
   }
 
+  registerLibraryIpc(db);
   createWindow();
 
   // macOS keeps an app running with no open windows; clicking the dock

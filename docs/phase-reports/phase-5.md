@@ -44,5 +44,41 @@ A real, permanent local database (`better-sqlite3`), per CLAUDE.md Section 6.2:
 - Confirmed the real Electron binary (from step 1's fix) was still intact after this step's `npm install`.
 - A small, known, harmless warning: Node prints a one-line performance notice about re-parsing the new `.ts` files' module syntax (`MODULE_TYPELESS_PACKAGE_JSON`). Not an error, not something masking a real problem - noted here rather than silently ignored.
 
-### Real-window check (per the step 1 standing process - not yet done by me, no display here)
-**Ranjish to confirm:** run `npm run dev` from `apps/desktop`. Resize or move the window, then fully quit the app, then reopen it - the window should come back at the exact size and position it was left at. That is the database actually working, not a claim from a passing test.
+### Real-window check
+**Confirmed by Ranjish:** moved and resized the window, closed the app, reopened it - it came back at the exact size and position it was left at. Step 2 confirmed working, for real.
+
+### Process correction
+Step 2 was committed before Ranjish's real-window check, not after - against our own agreed order (step 1's standing process says the real check happens before committing, not after). Corrected going forward: step 3 (below) is held uncommitted until Ranjish confirms the real-window check himself.
+
+---
+
+## Step 3 — library import (commit pending, `feat(desktop): library import`)
+
+### What was built
+Real Serato CSV import, per CLAUDE.md Section 6.1:
+- **A proper RFC-4180 CSV parser** (`library/parseCsv.ts`) - handles commas inside quoted fields, escaped quotes (`""`), newlines inside a quoted field, a leading UTF-8 BOM, and both CRLF/LF line endings. Headers are lowercased.
+- **Row normalization** (`library/normalizeTrack.ts`) - the display-name rule and the Camelot key-notation cleanup (`8M`->`8A`, `2D`->`2B`, etc.) copied faithfully from the project's own reference spec (`reference/CheatCodeDJ_v_1_0_22016.sanitized.jsx`), not invented fresh or looked at from any other branch. A real `0` play count is kept as `0`, distinct from an empty/absent one (kept as unknown, not silently zeroed). Unknown columns are preserved, not dropped. A row is only rejected if it has none of title/location/filename, with the reason and 1-based line number recorded - never a crash.
+- **A new `tracks` table** (migration 2) and storage functions (`db/tracks.ts`) - a full import replaces the table in one transaction (no partial-merge/sync logic yet - that's real Phase 5/6 work, not built here).
+- **One narrow IPC function pulled forward from step 4** (`main/ipc.ts`, `preload/index.ts`) - `library.importFromFile()`. The renderer never supplies a file path; the file comes from a native OS "Open" dialog the main process controls.
+- **Renderer**: a new "Step 3: library import" section with a real button, plus the step 1/2 lede text updated (it still said "Next: a real local database" after step 2 shipped - fixed).
+
+### Verification done
+- 32/32 tests pass (19 new: 5 CSV-parser edge cases incl. quoted commas/quotes/newlines/BOM/CRLF, header lowercasing, 6 `normalizeTrack` rules incl. the real-0-vs-unknown play count distinction, a rejected-row line-number check, 3 `tracks`-table storage tests, and a real, measured benchmark).
+- **75,000-row benchmark (CLAUDE.md's own Phase 5 test list), actually measured, not assumed: 512ms.**
+- Found and fixed a real break in step 2's own tests: they'd hardcoded "the latest schema version is 1," which broke the moment step 3 legitimately added migration 2. Fixed to check against the real migrations list instead of a hardcoded number, so a future step 4/5 migration won't break this again.
+- Typecheck clean, build succeeds. Real build output re-checked: still 0 hits for `window.storage`/`api.anthropic.com`.
+
+### Three real bugs found by Ranjish testing the real window, with real evidence, before committing
+
+**1. Saved data wasn't shown again after restart.** Checked directly, not assumed: queried the real `ccdj.sqlite` file on disk (`%APPDATA%\ccdj-desktop\ccdj.sqlite`) after closing the app - `SELECT COUNT(*) FROM tracks` genuinely returned 38,484, with real track names. **The data was never lost** - the bug was that nothing on startup read it back and displayed it. Fixed: a new `library:getStatus` IPC function + a renderer startup check, so the screen now shows what's already saved instead of looking empty.
+
+**2. Duplicate-import risk, checked at full scale, not just a small test.** Imported the real `Crates.csv` into a real database file three times in a row: `38484 -> 38484 -> 38484`. No duplication, confirmed with real evidence (`replaceAllTracks`'s whole-table replace, inside one transaction, was already correct here).
+
+**3. The real bug behind "38484 rejected."** Direct byte inspection of `Crates.csv` found every row actually ends in a doubled `\r\r\n`, not a plain `\r\n` - a genuine export quirk, not expected. The parser (correctly, by RFC-4180/old-Mac-line-ending rules) treated the lone `\r` and the following `\r\n` as TWO separate line endings, producing one real row plus one spurious empty row for every single real song - doubling the apparent row count and reporting half the file as "rejected," when none of it actually was. **Fixed at the root**: consecutive line-break characters now collapse into one row boundary. Re-ran the import after the fix: **0 rejected**, `38484 -> 38484` kept, confirmed clean.
+
+Also kept, defensively, even though it's no longer triggered on this file: `normalizeTrack` now tells a genuinely blank row apart from a row that has real data but is still unusable, and the screen shows "N blank line(s) skipped" separately from "N row(s) need attention" - not a flat, ambiguous "rejected" number.
+
+**4. The real explanation for 38,486 (prototype) vs 38,484 (this import), checked by directly diffing both parsers' actual output - not guessed:** every one of the 2 missing/differing entries is a title containing an escaped quote mark, like `12"` (a real 12-inch-single mark) or `"N"`. The old prototype's own parser (`apps/server/src/engine/parsing.js`) has no concept of RFC-4180's `""`-escaping - it toggles quote-state on every single `"` character, which corrupts its own field boundaries on exactly these rows (confirmed directly: its output for one of them literally reads `Word Up! (12 Club Mix...)` - missing the real quote mark - and for 2 of them, the corruption causes it to emit one real song as two garbled, duplicate-looking fragments, artificially inflating its own count by 2). This is exactly CLAUDE.md's own R24 parity rule: a difference is expected and correct when it's a row the prototype itself mis-parses (escaped quotes), not a defect in the new parser. 38,484 is the correct, true count of distinct real songs in this file.
+
+### Real-window check
+**Ranjish to confirm before this gets committed, per our agreed order:** run `npm run dev` from `apps/desktop`. Click "Import CSV library..." and pick the real `Crates.csv` at the repo root. The screen should show 38,484 imported, 0 blank lines/rows needing attention, and real sample names. Then fully quit and reopen the app - it should show "38,484 tracks saved from before" immediately, without re-importing. Then import the same file again - the count should stay 38,484, not double.

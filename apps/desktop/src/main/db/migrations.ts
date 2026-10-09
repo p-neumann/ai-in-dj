@@ -28,5 +28,30 @@ export const migrations: Migration[] = [
         );
       `);
     }
+  },
+  {
+    // Step 3: library import. A re-import (step 3's only import path for
+    // now) replaces the whole table inside one transaction - CLAUDE.md's
+    // real revision-based sync (only upserting changes) is later, Phase 5/6
+    // work, not built here.
+    version: 2,
+    up(db) {
+      db.exec(`
+        CREATE TABLE tracks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          displayName TEXT NOT NULL,
+          artist TEXT NOT NULL,
+          title TEXT NOT NULL,
+          bpm REAL NOT NULL,
+          key TEXT NOT NULL,
+          genre TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          playcount INTEGER,
+          durationSec INTEGER,
+          location TEXT NOT NULL,
+          extra TEXT NOT NULL
+        );
+      `);
+    }
   }
 ];

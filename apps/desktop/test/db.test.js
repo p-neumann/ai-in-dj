@@ -17,6 +17,13 @@ const { runMigrations, getSchemaVersion } = require("../src/main/db/migrate.ts")
 const { openDatabase } = require("../src/main/db/openDatabase.ts");
 const { getWindowBounds, saveWindowBounds } = require("../src/main/db/windowBounds.ts");
 const { getPreference, setPreference } = require("../src/main/db/preferences.ts");
+const { migrations } = require("../src/main/db/migrations.ts");
+
+// Checked against the real migrations list, not a hardcoded number - this
+// file only cares that ALL migrations ran, not how many exist right now.
+// (It was "1" when this file was written in step 2; step 3 legitimately
+// added a 2nd migration, which is exactly why this isn't hardcoded.)
+const LATEST_VERSION = migrations[migrations.length - 1].version;
 
 function tempDbPath() {
   const dir = mkdtempSync(join(tmpdir(), "ccdj-db-test-"));
@@ -29,7 +36,7 @@ test("migrations run cleanly starting from a brand-new, empty database", () => {
 
   runMigrations(db);
 
-  assert.equal(getSchemaVersion(db), 1, "migration 1 is applied");
+  assert.equal(getSchemaVersion(db), LATEST_VERSION, "every migration up to the latest is applied");
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table'")
     .all()
@@ -43,7 +50,7 @@ test("running migrations twice is safe (already-applied migrations are not re-ru
   const db = new Database(":memory:");
   runMigrations(db);
   runMigrations(db); // must not throw (e.g. "table already exists")
-  assert.equal(getSchemaVersion(db), 1);
+  assert.equal(getSchemaVersion(db), LATEST_VERSION);
   db.close();
 });
 
@@ -83,7 +90,7 @@ test("openDatabase: a real file path runs migrations and reports no corruption",
   const result = openDatabase(filePath);
   assert.equal(result.recoveredFromCorruption, false);
   assert.equal(result.backupPath, null);
-  assert.equal(getSchemaVersion(result.db), 1);
+  assert.equal(getSchemaVersion(result.db), LATEST_VERSION);
   result.db.close();
   rmSync(filePath, { force: true });
 });
@@ -101,7 +108,7 @@ test("openDatabase: a genuinely corrupt file is backed up and replaced with a fr
   assert.ok(existsSync(filePath), "a fresh database file must exist at the original path");
 
   // The fresh database must be genuinely usable, not just present.
-  assert.equal(getSchemaVersion(result.db), 1);
+  assert.equal(getSchemaVersion(result.db), LATEST_VERSION);
   saveWindowBounds(result.db, { x: 1, y: 2, width: 800, height: 600 });
   assert.deepEqual(getWindowBounds(result.db), { x: 1, y: 2, width: 800, height: 600 });
 
