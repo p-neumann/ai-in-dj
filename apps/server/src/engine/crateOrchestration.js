@@ -335,7 +335,18 @@ export async function runBuildCrateBody(input, provider) {
   const requestCount = strictArtistLock
     ? Math.min(playlistSize + 35, Math.max(playlistSize, distinctArtistSongCount + 5))
     : playlistSize + nonLockExtra;
-  const dynamicMaxTokens = Math.min(8000, 2500 + requestCount * 180);
+  // Was Math.min(8000, 2500 + requestCount*180). Raised 2026-10-07
+  // (docs/decisions/0008) after a real, billed call against the real
+  // ~38k-track library hit this exact ceiling: requestCount 15 produced
+  // 5200, and the model's thinking alone used 4522 of it - leaving only
+  // 678 tokens, not enough to finish the answer (it stopped mid-array
+  // after 10 of 15 requested tracks). Same root cause as the Track Cheat
+  // fix (docs/decisions/0006, 0007): Sonnet 5's default thinking bills
+  // against this same ceiling. Raised the base and the outer cap so the
+  // same request now gets 8700 - about 4200 tokens of headroom beyond the
+  // thinking usage actually observed, instead of 678. Still scales with
+  // requestCount exactly as before - only the two numbers changed.
+  const dynamicMaxTokens = Math.min(16000, 6000 + requestCount * 180);
   const candidatePoolSize = ctx.indexed.length;
   const simulated = provider.kind !== "anthropic";
 
