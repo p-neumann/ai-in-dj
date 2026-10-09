@@ -1,25 +1,37 @@
-// CCDJ desktop - main process (Phase 5, step 1: just the window).
+// CCDJ desktop - main process.
 //
 // This is the only process allowed to touch the operating system - real
-// files, a real database, Serato - per CLAUDE.md Section 5.6. None of that
-// exists yet. This file's only job right now is opening a window safely.
+// files, a real database, Serato - per CLAUDE.md Section 5.6.
 //
-// The security settings below (CLAUDE.md Section 7.5) are the actual point
-// of this step: the renderer must never be able to read Node modules, touch
-// the filesystem, or run arbitrary code, even though it's showing a web
-// page. test/security.test.js fails if any of these are weakened.
+// Step 1 (done): a window that opens safely (Section 7.5 hardening).
+// Step 2 (this file now): a real, permanent local database, proven by the
+// window remembering its own size/position across restarts - CLAUDE.md's
+// own Phase 5 "Expected result": "restart keeps ... window bounds."
 
 import { app, BrowserWindow, shell } from "electron";
 import { join } from "node:path";
+import type Database from "better-sqlite3";
+import { openDatabase } from "./db/openDatabase.ts";
+import { getWindowBounds, saveWindowBounds } from "./db/windowBounds.ts";
+
+// Provisional defaults until Mike confirms D7 (CLAUDE.md 8.2 - "label any
+// number you pick as provisional"). Only used when nothing's been saved yet.
+const DEFAULT_WIDTH = 1200;
+const DEFAULT_HEIGHT = 800;
+const MIN_WIDTH = 900;
+const MIN_HEIGHT = 600;
+
+let db: Database.Database;
 
 function createWindow(): void {
+  const saved = getWindowBounds(db);
+
   const window = new BrowserWindow({
-    // Default/minimum size: provisional until Mike confirms D7 (CLAUDE.md
-    // 8.2 - "label any number you pick as provisional").
-    width: 1200,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width: saved?.width ?? DEFAULT_WIDTH,
+    height: saved?.height ?? DEFAULT_HEIGHT,
+    ...(saved?.x != null && saved?.y != null ? { x: saved.x, y: saved.y } : {}),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -29,6 +41,14 @@ function createWindow(): void {
       sandbox: true
     }
   });
+
+  const persistBounds = (): void => {
+    const bounds = window.getBounds();
+    saveWindowBounds(db, { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+  };
+  window.on("resize", persistBounds);
+  window.on("move", persistBounds);
+  window.on("close", persistBounds);
 
   // Don't show a blank/white frame while the page is still loading.
   window.once("ready-to-show", () => window.show());
@@ -52,6 +72,16 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  const dbPath = join(app.getPath("userData"), "ccdj.sqlite");
+  const opened = openDatabase(dbPath);
+  db = opened.db;
+  if (opened.recoveredFromCorruption) {
+    // CLAUDE.md Section 6.2: "tell the user." No real UI to tell them with
+    // yet (that's a later step) - logged for now so this is at least
+    // visible, not silent.
+    console.warn(`Database at ${dbPath} was damaged and has been reset. The old file was kept at: ${opened.backupPath}`);
+  }
+
   createWindow();
 
   // macOS keeps an app running with no open windows; clicking the dock
@@ -63,4 +93,8 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  db?.close();
 });
