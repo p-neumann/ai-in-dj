@@ -40,6 +40,14 @@ test("the preload refuses to expose anything if isolation is somehow off", () =>
   assert.match(preloadSource, /process\.contextIsolated/);
 });
 
+test("only one copy of the app may run at once (two copies would fight over the same database file)", () => {
+  // Found for real: a second instance running by accident produced
+  // "Unable to move the cache: Access is denied" GPU-cache errors, and
+  // would mean two processes writing the same SQLite file at once.
+  assert.match(mainSource, /requestSingleInstanceLock/);
+  assert.match(mainSource, /second-instance/);
+});
+
 test("Phase 5 gate: no artifact-era shortcuts anywhere in the desktop source", () => {
   // CLAUDE.md's own Phase 5 gate: "no window.storage or api.anthropic.com
   // strings in the desktop bundle." Checked here against source as a fast

@@ -3,12 +3,13 @@
 // The only channel the renderer has into the main process (CLAUDE.md
 // Section 7.5): expose ONLY named, validated functions - never generic
 // file access, never raw paths from the renderer.
-//
-// Step 3 exposes its first two real functions: importing a library CSV,
-// and asking what's already saved (so a restart shows the existing
-// library instead of looking empty until the DJ re-imports it).
 
 import { contextBridge, ipcRenderer } from "electron";
+
+export interface SampleTrack {
+  id: number;
+  displayName: string;
+}
 
 export interface LibraryImportResult {
   cancelled: boolean;
@@ -16,19 +17,42 @@ export interface LibraryImportResult {
   blankLinesSkipped?: number;
   rowsNeedingAttention?: number;
   totalRows?: number;
-  sampleNames?: string[];
+  sampleTracks?: SampleTrack[];
 }
 
 export interface LibraryStatus {
   count: number;
-  sampleNames: string[];
+  sampleTracks: SampleTrack[];
+}
+
+export interface HistoryRow {
+  id: number;
+  timestamp: number;
+  entry: unknown;
+}
+
+export interface ShowInFinderResult {
+  ok: boolean;
+  reason?: string;
 }
 
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
     getStatus: (): Promise<LibraryStatus> => ipcRenderer.invoke("library:getStatus")
-  }
+  },
+  prefs: {
+    get: (key: string): Promise<string | null> => ipcRenderer.invoke("prefs:get", key),
+    set: (key: string, value: string): Promise<boolean> => ipcRenderer.invoke("prefs:set", key, value)
+  },
+  history: {
+    append: (entry: unknown): Promise<boolean> => ipcRenderer.invoke("history:append", entry),
+    list: (limit: number): Promise<HistoryRow[]> => ipcRenderer.invoke("history:list", limit)
+  },
+  // R18 - keeps the prototype's own function names.
+  showInFinder: (trackId: number): Promise<ShowInFinderResult> =>
+    ipcRenderer.invoke("files:showInFinder", trackId),
+  setAlwaysOnTop: (flag: boolean): Promise<boolean> => ipcRenderer.invoke("window:setAlwaysOnTop", flag)
 };
 
 if (process.contextIsolated) {

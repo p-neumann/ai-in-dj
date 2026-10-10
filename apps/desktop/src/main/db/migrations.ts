@@ -53,5 +53,22 @@ export const migrations: Migration[] = [
         );
       `);
     }
+  },
+  {
+    // Step 4: a generic history log. The real session-history SHAPE
+    // (seed, vibeOffset, trigger, results[], etc. - CLAUDE.md Section 6.5)
+    // doesn't exist to store yet, since real Track Cheat isn't built until
+    // step 5 - storing an arbitrary JSON entry now means step 5 can start
+    // writing the real shape later without this table needing to change.
+    version: 3,
+    up(db) {
+      db.exec(`
+        CREATE TABLE history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp INTEGER NOT NULL,
+          entry TEXT NOT NULL
+        );
+      `);
+    }
   }
 ];

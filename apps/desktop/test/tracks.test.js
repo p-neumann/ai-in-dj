@@ -6,7 +6,13 @@ const assert = require("node:assert/strict");
 const Database = require("better-sqlite3");
 
 const { runMigrations } = require("../src/main/db/migrate.ts");
-const { replaceAllTracks, countTracks, getSampleTrackNames } = require("../src/main/db/tracks.ts");
+const {
+  replaceAllTracks,
+  countTracks,
+  getSampleTrackNames,
+  getSampleTracks,
+  getTrackLocation
+} = require("../src/main/db/tracks.ts");
 
 function sampleTrack(n) {
   return {
@@ -53,5 +59,27 @@ test("getSampleTrackNames: returns real display names, up to the requested limit
   const names = getSampleTrackNames(db, 2);
   assert.equal(names.length, 2);
   assert.ok(names.every((n) => n.startsWith("Song ")));
+  db.close();
+});
+
+test("getSampleTracks: returns real ids alongside display names - step 4 needs the id to reveal a file", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1), sampleTrack(2)]);
+
+  const tracks = getSampleTracks(db, 10);
+  assert.equal(tracks.length, 2);
+  assert.ok(tracks.every((t) => typeof t.id === "number" && t.displayName.startsWith("Song ")));
+  db.close();
+});
+
+test("getTrackLocation: returns the real path for a known id, and null for an unknown one", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1)]);
+
+  const [track] = getSampleTracks(db, 1);
+  assert.equal(getTrackLocation(db, track.id), "/Music/Song 1.mp3");
+  assert.equal(getTrackLocation(db, 999999), null, "an id the renderer made up must never resolve to a real path");
   db.close();
 });

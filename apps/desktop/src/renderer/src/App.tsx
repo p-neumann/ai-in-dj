@@ -42,7 +42,7 @@ function runChecks(): Check[] {
 type ImportState =
   | { status: "loading" }
   | { status: "empty" }
-  | { status: "saved"; count: number; sampleNames: string[] }
+  | { status: "saved"; count: number; sampleTracks: CcdjSampleTrack[] }
   | { status: "importing" }
   | {
       status: "done";
@@ -50,7 +50,7 @@ type ImportState =
       blankLinesSkipped: number;
       rowsNeedingAttention: number;
       totalRows: number;
-      sampleNames: string[];
+      sampleTracks: CcdjSampleTrack[];
     }
   | { status: "cancelled" }
   | { status: "error"; message: string };
@@ -85,12 +85,15 @@ export default function App(): React.JSX.Element {
         blankLinesSkipped: result.blankLinesSkipped ?? 0,
         rowsNeedingAttention: result.rowsNeedingAttention ?? 0,
         totalRows: result.totalRows ?? 0,
-        sampleNames: result.sampleNames ?? []
+        sampleTracks: result.sampleTracks ?? []
       });
     } catch (error) {
       setImportState({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
+
+  const sampleTracksToShow =
+    importState.status === "saved" || importState.status === "done" ? importState.sampleTracks : [];
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 640 }}>
@@ -99,9 +102,9 @@ export default function App(): React.JSX.Element {
       </p>
       <h1>Desktop shell</h1>
       <p>
-        Step 1: window opens with the security locks on. Step 2: a real local database (resize/move this window,
-        quit, reopen - it remembers). Step 3 (below): real library import, saved for good. Next: the rest of the
-        locked-door bridge, then the real screens.
+        Step 1: window opens with the security locks on. Step 2: a real local database. Step 3: real library
+        import, saved for good. Step 4 (below): the rest of the locked-door bridge - preferences, history, reveal
+        in Finder, always on top. Next: the real screens.
       </p>
 
       <section
@@ -138,46 +141,138 @@ export default function App(): React.JSX.Element {
         {importState.status === "error" && <p style={{ color: "#c62828" }}>Error: {importState.message}</p>}
 
         {importState.status === "saved" && (
-          <div style={{ marginTop: "0.5rem" }}>
-            <p>
-              <b>{importState.count}</b> tracks saved from before (loaded from the database, not re-imported).
-            </p>
-            <SampleList names={importState.sampleNames} />
-          </div>
+          <p>
+            <b>{importState.count}</b> tracks saved from before (loaded from the database, not re-imported).
+          </p>
         )}
 
         {importState.status === "done" && (
-          <div style={{ marginTop: "0.5rem" }}>
-            <p>
-              Imported <b>{importState.imported}</b> tracks out of {importState.totalRows} rows.
-              {importState.blankLinesSkipped > 0 && (
-                <> {importState.blankLinesSkipped} blank line(s) skipped.</>
-              )}
-              {importState.rowsNeedingAttention > 0 && (
-                <>
-                  {" "}
-                  <span style={{ color: "#c62828" }}>
-                    {importState.rowsNeedingAttention} row(s) need attention (had some data, but no usable
-                    title/location).
-                  </span>
-                </>
-              )}
-            </p>
-            <SampleList names={importState.sampleNames} />
-          </div>
+          <p>
+            Imported <b>{importState.imported}</b> tracks out of {importState.totalRows} rows.
+            {importState.blankLinesSkipped > 0 && <> {importState.blankLinesSkipped} blank line(s) skipped.</>}
+            {importState.rowsNeedingAttention > 0 && (
+              <>
+                {" "}
+                <span style={{ color: "#c62828" }}>
+                  {importState.rowsNeedingAttention} row(s) need attention (had some data, but no usable
+                  title/location).
+                </span>
+              </>
+            )}
+          </p>
         )}
+
+        <SampleTrackList tracks={sampleTracksToShow} />
       </section>
+
+      <PreferencesSection />
+      <HistorySection />
+      <AlwaysOnTopSection />
     </main>
   );
 }
 
-function SampleList({ names }: { names: string[] }): React.JSX.Element | null {
-  if (names.length === 0) return null;
+function SampleTrackList({ tracks }: { tracks: CcdjSampleTrack[] }): React.JSX.Element | null {
+  const [revealResult, setRevealResult] = useState<Record<number, string>>({});
+
+  if (tracks.length === 0) return null;
+
+  async function handleReveal(id: number): Promise<void> {
+    const result = await window.ccdj.showInFinder(id);
+    setRevealResult((prev) => ({
+      ...prev,
+      [id]: result.ok ? "Opened." : `Could not open: ${result.reason}`
+    }));
+  }
+
   return (
-    <ul style={{ paddingLeft: "1.2rem", fontSize: 13, color: "#666" }}>
-      {names.map((name) => (
-        <li key={name}>{name}</li>
+    <ul style={{ paddingLeft: "1.2rem", fontSize: 13, color: "#666", marginTop: "0.5rem" }}>
+      {tracks.map((t) => (
+        <li key={t.id} style={{ marginBottom: "0.3rem" }}>
+          {t.displayName}{" "}
+          <button onClick={() => handleReveal(t.id)} style={{ fontSize: 11 }}>
+            Reveal in Finder
+          </button>
+          {revealResult[t.id] && <span style={{ marginLeft: "0.5rem" }}>{revealResult[t.id]}</span>}
+        </li>
       ))}
     </ul>
+  );
+}
+
+function PreferencesSection(): React.JSX.Element {
+  const PREF_KEY = "step4TestPreference";
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.ccdj.prefs.get(PREF_KEY).then((v) => setSaved(v));
+  }, []);
+
+  async function handleSave(): Promise<void> {
+    await window.ccdj.prefs.set(PREF_KEY, value);
+    setSaved(value);
+  }
+
+  return (
+    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
+      <h2 style={{ marginTop: 0 }}>Step 4: preferences</h2>
+      <p style={{ fontSize: 13, color: "#666" }}>
+        Currently saved: <b>{saved === null ? "(nothing saved yet)" : saved === "" ? "(empty string)" : saved}</b>
+      </p>
+      <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Type anything..." />
+      <button onClick={handleSave} style={{ marginLeft: "0.5rem" }}>
+        Save (then restart the app to prove it persists)
+      </button>
+    </section>
+  );
+}
+
+function HistorySection(): React.JSX.Element {
+  const [entries, setEntries] = useState<CcdjHistoryRow[]>([]);
+
+  async function refresh(): Promise<void> {
+    setEntries(await window.ccdj.history.list(10));
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function handleAppend(): Promise<void> {
+    await window.ccdj.history.append({ note: "manual test entry", at: new Date().toISOString() });
+    await refresh();
+  }
+
+  return (
+    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
+      <h2 style={{ marginTop: 0 }}>Step 4: history</h2>
+      <button onClick={handleAppend}>Append a test entry</button>
+      <ul style={{ paddingLeft: "1.2rem", fontSize: 13, color: "#666", marginTop: "0.5rem" }}>
+        {entries.map((e) => (
+          <li key={e.id}>
+            #{e.id} ({new Date(e.timestamp).toLocaleTimeString()}): {JSON.stringify(e.entry)}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function AlwaysOnTopSection(): React.JSX.Element {
+  const [pinned, setPinned] = useState(false);
+
+  async function handleToggle(): Promise<void> {
+    const confirmed = await window.ccdj.setAlwaysOnTop(!pinned);
+    setPinned(confirmed);
+  }
+
+  return (
+    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
+      <h2 style={{ marginTop: 0 }}>Step 4: always on top</h2>
+      <label>
+        <input type="checkbox" checked={pinned} onChange={handleToggle} /> Pin this window above other windows
+      </label>
+    </section>
   );
 }

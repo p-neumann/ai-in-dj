@@ -33,3 +33,22 @@ export function getSampleTrackNames(db: Database.Database, limit: number): strin
   }>;
   return rows.map((r) => r.displayName);
 }
+
+export interface SampleTrack {
+  id: number;
+  displayName: string;
+}
+
+export function getSampleTracks(db: Database.Database, limit: number): SampleTrack[] {
+  return db.prepare("SELECT id, displayName FROM tracks LIMIT ?").all(limit) as SampleTrack[];
+}
+
+// The renderer only ever says "show me track #N" - it never gets to hand
+// the main process a raw path itself (CLAUDE.md 7.5: "File operations
+// accept only trackIds... never a raw path from the renderer").
+export function getTrackLocation(db: Database.Database, trackId: number): string | null {
+  const row = db.prepare("SELECT location FROM tracks WHERE id = ?").get(trackId) as
+    | { location: string }
+    | undefined;
+  return row ? row.location : null;
+}

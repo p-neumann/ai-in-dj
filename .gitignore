@@ -31,3 +31,7 @@ Thumbs.db
 
 # Local-only working notes; never published to the public repo
 docs/QUESTIONS.md
+
+# Manual-test fixture with a hardcoded path from Ranjish's own machine -
+# not portable, not for the shared repo
+apps/desktop/test/fixtures/reveal-in-finder-manual-test.csv

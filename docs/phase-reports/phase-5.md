@@ -81,4 +81,38 @@ Also kept, defensively, even though it's no longer triggered on this file: `norm
 **4. The real explanation for 38,486 (prototype) vs 38,484 (this import), checked by directly diffing both parsers' actual output - not guessed:** every one of the 2 missing/differing entries is a title containing an escaped quote mark, like `12"` (a real 12-inch-single mark) or `"N"`. The old prototype's own parser (`apps/server/src/engine/parsing.js`) has no concept of RFC-4180's `""`-escaping - it toggles quote-state on every single `"` character, which corrupts its own field boundaries on exactly these rows (confirmed directly: its output for one of them literally reads `Word Up! (12 Club Mix...)` - missing the real quote mark - and for 2 of them, the corruption causes it to emit one real song as two garbled, duplicate-looking fragments, artificially inflating its own count by 2). This is exactly CLAUDE.md's own R24 parity rule: a difference is expected and correct when it's a row the prototype itself mis-parses (escaped quotes), not a defect in the new parser. 38,484 is the correct, true count of distinct real songs in this file.
 
 ### Real-window check
-**Ranjish to confirm before this gets committed, per our agreed order:** run `npm run dev` from `apps/desktop`. Click "Import CSV library..." and pick the real `Crates.csv` at the repo root. The screen should show 38,484 imported, 0 blank lines/rows needing attention, and real sample names. Then fully quit and reopen the app - it should show "38,484 tracks saved from before" immediately, without re-importing. Then import the same file again - the count should stay 38,484, not double.
+**Confirmed by Ranjish:** import showed 38,484/38,484, restart showed the saved count immediately with no re-import, and importing again stayed at 38,484. Step 3 confirmed working, for real.
+
+---
+
+## Step 4 — the rest of the locked-door bridge (commit pending, `feat(desktop): finish the bridge - prefs, history, showInFinder, setAlwaysOnTop`)
+
+### What was built
+Four more narrow, named IPC functions (CLAUDE.md Section 7.5), finishing what the step-1 preload file's own comment had already listed as coming:
+- **`prefs.get`/`prefs.set`** - wired to the preferences store already built in step 2.
+- **`history.append`/`history.list`** - a new, generic history table (migration 3). Stores whatever JSON-serializable entry it's given; the real Track Cheat session-history shape (CLAUDE.md Section 6.5) doesn't exist to store yet (that's step 5) - this layer doesn't need to guess that shape in advance.
+- **`showInFinder(trackId)`** (R18, the prototype's own name) - the renderer only ever says "show me track #N"; the real file path lookup happens on the trusted main-process side (`db/tracks.ts`'s new `getTrackLocation`), never a raw path accepted from the renderer.
+- **`setAlwaysOnTop(flag)`** (R18, the prototype's own name) - pins the real window above others.
+- **Renderer**: three new sections (preferences, history, always-on-top) plus a "Reveal in Finder" button next to each sample track shown from step 3.
+
+### A real, honest limitation flagged before testing, not discovered by accident
+The real library you imported has Mac-style paths (`/Volumes/...`) that don't exist on this Windows machine - clicking "Reveal in Finder" on those will correctly do nothing, since those files genuinely aren't here, not because the feature is broken. Added a small, **local-only, not committed** fixture (`test/fixtures/reveal-in-finder-manual-test.csv`, gitignored - it hardcodes a real path from this one machine, not portable or meant for the shared repo) pointing at two files that actually exist here, so this feature has something real to prove itself against today. Full behavior on an actual Mac next to Serato still needs real Mac verification later - unchanged.
+
+### Verification done
+- 39/39 tests pass (4 new: history round-trips the exact entry shape, not just a string; history returns newest-first and respects a limit; `getSampleTracks` returns real ids; `getTrackLocation` returns the real path for a known id and `null` - never a guess - for an unknown one).
+- Typecheck clean, build succeeds. Real build output re-checked: still 0 hits for `window.storage`/`api.anthropic.com`.
+
+### Real-window check (Ranjish, confirmed)
+Preferences persisted after a real restart, history showed newest first, Reveal in Finder opened a real Explorer window on the test file, and Always on Top kept the window in front. Step 4's four bridge functions confirmed working, for real.
+
+**Also confirmed, real evidence, not assumed:** importing the 2-row test fixture genuinely replaced the saved 38,484-track library down to 2 rows (queried the real `.sqlite` file directly to check) - this is step 3's own documented "a full import replaces the table" behavior working exactly as designed, not a new bug. Flagging it here since it had a real, visible consequence during this test: re-import `Crates.csv` to get the real library back.
+
+### A second real bug found during this same real-window test: two copies of the app running at once
+The terminal showed `Unable to move the cache: Access is denied (0x5)` and a GPU cache creation failure, from two process IDs at once - a real second instance of the app had started while the first was still running. Confirmed the cause: both copies were fighting over the same Chromium GPU-cache folder on disk - and, more seriously, both would have been opening the exact same SQLite database file at the same time, risking write conflicts between them (not something to leave to chance in a desktop app).
+
+**Fix:** added Electron's standard single-instance lock (`app.requestSingleInstanceLock()`). Only one copy of the app can ever run now; a second launch attempt just brings the real, already-running window to the front instead of opening a duplicate. Added a regression test (`security.test.js`) so this can't be silently removed later. 40/40 tests pass, typecheck clean, build clean, `requestSingleInstanceLock` confirmed present in the real compiled output.
+
+### Real-window check - waiting on Ranjish before this gets committed
+Run `npm run dev` from `apps/desktop` (re-import `Crates.csv` first if you want the real library back for this check).
+- **Preferences / History / Reveal in Finder / Always on top**: already confirmed above - no need to redo unless something seems off.
+- **Single-instance lock (new):** with the app already running, run `npm run dev` a second time in another terminal. Expect: no second window opens; the existing window comes to the front instead. No GPU-cache error this time.
