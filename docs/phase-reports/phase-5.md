@@ -112,7 +112,34 @@ The terminal showed `Unable to move the cache: Access is denied (0x5)` and a GPU
 
 **Fix:** added Electron's standard single-instance lock (`app.requestSingleInstanceLock()`). Only one copy of the app can ever run now; a second launch attempt just brings the real, already-running window to the front instead of opening a duplicate. Added a regression test (`security.test.js`) so this can't be silently removed later. 40/40 tests pass, typecheck clean, build clean, `requestSingleInstanceLock` confirmed present in the real compiled output.
 
+### Real-window check (Ranjish, confirmed)
+Single-instance lock: a real second launch correctly failed to open a second window, no GPU-cache error. Step 4 fully confirmed.
+
+---
+
+## Step 5, piece 1 — the pipe to the real backend (commit pending)
+
+### Plan agreed before building anything (Ranjish's own rules)
+- Port Mike's real screens, don't redesign them.
+- Every AI request goes through the real backend server - this app must never call Anthropic directly or contain any key.
+- `LIVE_AI_CALLS` stays `false`; use the simulated provider until a real call is explicitly approved.
+- Ordered pieces: **(1) the pipe** -> (2) Library screen -> (3) Track Cheat core -> (4) daisy-chain/votes -> (5) Crate Cheat -> (6) Playlist Cheat -> (7) Account/Settings -> (8) polish.
+
+### What was built (piece 1 only - no AI involved at all)
+A real, proven HTTP connection from this app to the backend server, following CLAUDE.md Section 5.6's own architecture diagram exactly: the real network call lives in the **main process** (`src/main/backendClient.ts`), never the renderer. The renderer only ever asks main, through the same locked-door bridge from steps 1-4, to check the connection or create a session - it never fetches anything itself and never sees the dev token.
+- `checkBackendHealth()` -> `GET /healthz` (no auth needed, matches the real route).
+- `createBackendSession()` -> `POST /v1/sessions` with the dev-token `Authorization` header (`apps/desktop/.env`, mirroring `apps/server/.env`'s own `DEV_TOKENS` value - a local dev convenience, not a real secret, same category as the server's own dev token).
+- Renderer: a new "Step 5, piece 1: backend connection" section - checks health on load, with a "Check again" button and a "Create a real session" button showing the real returned session ID.
+
+### Verification done
+- 45/45 tests pass (5 new: real request-shape checks against a stubbed `fetch` - correct URL, correct method, correct `Authorization` header, a network error caught and reported rather than thrown, a non-ok HTTP response reported as a clear failure). The real end-to-end network call itself is proven by the real-window check below, not by these - same approach as every other Electron-specific piece in this project.
+- Typecheck clean, build succeeds.
+- **Checked the real compiled renderer bundle specifically for this piece** (not just the old gate): zero hits for the dev token, and zero hits for the backend URL, anywhere in `out/renderer/assets/*.js` - confirming the architecture actually holds in the real build, not just in intent. The security gate (`window.storage`/`api.anthropic.com`) still holds too.
+- Sanity-checked the real backend server directly (`curl`) against the exact calls the app will make - `/healthz` and `POST /v1/sessions` with the real dev token both responded correctly - before handing this to Ranjish, so a real-window failure would point clearly at the Electron side, not an unrelated server issue.
+
 ### Real-window check - waiting on Ranjish before this gets committed
-Run `npm run dev` from `apps/desktop` (re-import `Crates.csv` first if you want the real library back for this check).
-- **Preferences / History / Reveal in Finder / Always on top**: already confirmed above - no need to redo unless something seems off.
-- **Single-instance lock (new):** with the app already running, run `npm run dev` a second time in another terminal. Expect: no second window opens; the existing window comes to the front instead. No GPU-cache error this time.
+1. Start the real backend: `cd apps/server`, then `npm start` (confirm it logs `provider: mock` - `LIVE_AI_CALLS` must stay `false`).
+2. In another terminal: `cd apps/desktop`, then `npm run dev`.
+3. The "Step 5, piece 1" section should show **"✓ Connected to the backend server"** within a second or two.
+4. Click "Create a real session" - expect a real session ID to appear (starts with `s_`).
+5. Stop the server (Ctrl+C in its terminal), then click "Check again" - expect it to switch to **"✗ Not reachable"** instead of crashing the app.

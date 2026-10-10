@@ -20,13 +20,29 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { openDatabase } from "./db/openDatabase.ts";
 import { getWindowBounds, saveWindowBounds } from "./db/windowBounds.ts";
-import { registerLibraryIpc, registerPreferencesIpc, registerHistoryIpc, registerFileIpc, registerWindowIpc } from "./ipc.ts";
+import {
+  registerLibraryIpc,
+  registerPreferencesIpc,
+  registerHistoryIpc,
+  registerFileIpc,
+  registerWindowIpc,
+  registerBackendIpc
+} from "./ipc.ts";
 
 // Must happen before anything else touches the filesystem (the database,
 // the GPU cache) - that's the whole point.
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
+}
+
+// Step 5: BACKEND_URL/BACKEND_DEV_TOKEN for backendClient.ts. Missing
+// .env is fine - backendClient.ts falls back to localhost:8080 with no
+// token, which is already the common dev default.
+try {
+  process.loadEnvFile(join(__dirname, "../../.env"));
+} catch {
+  // No .env present - fall back to backendClient.ts's own defaults.
 }
 
 // Provisional defaults until Mike confirms D7 (CLAUDE.md 8.2 - "label any
@@ -113,6 +129,7 @@ if (gotSingleInstanceLock) {
     registerHistoryIpc(db);
     registerFileIpc(db);
     registerWindowIpc();
+    registerBackendIpc();
     createWindow();
 
     // macOS keeps an app running with no open windows; clicking the dock

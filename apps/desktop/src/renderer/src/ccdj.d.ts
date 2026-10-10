@@ -32,6 +32,19 @@ interface CcdjShowInFinderResult {
   reason?: string;
 }
 
+interface CcdjBackendHealthResult {
+  reachable: boolean;
+  error?: string;
+}
+
+interface CcdjBackendSessionResult {
+  ok: boolean;
+  sessionId?: string;
+  chainId?: string;
+  stateVersion?: number;
+  error?: string;
+}
+
 interface Window {
   ccdj: {
     library: {
@@ -48,5 +61,9 @@ interface Window {
     };
     showInFinder: (trackId: number) => Promise<CcdjShowInFinderResult>;
     setAlwaysOnTop: (flag: boolean) => Promise<boolean>;
+    backend: {
+      checkHealth: () => Promise<CcdjBackendHealthResult>;
+      createSession: () => Promise<CcdjBackendSessionResult>;
+    };
   };
 }

@@ -36,6 +36,19 @@ export interface ShowInFinderResult {
   reason?: string;
 }
 
+export interface BackendHealthResult {
+  reachable: boolean;
+  error?: string;
+}
+
+export interface BackendSessionResult {
+  ok: boolean;
+  sessionId?: string;
+  chainId?: string;
+  stateVersion?: number;
+  error?: string;
+}
+
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
@@ -52,7 +65,13 @@ const api = {
   // R18 - keeps the prototype's own function names.
   showInFinder: (trackId: number): Promise<ShowInFinderResult> =>
     ipcRenderer.invoke("files:showInFinder", trackId),
-  setAlwaysOnTop: (flag: boolean): Promise<boolean> => ipcRenderer.invoke("window:setAlwaysOnTop", flag)
+  setAlwaysOnTop: (flag: boolean): Promise<boolean> => ipcRenderer.invoke("window:setAlwaysOnTop", flag),
+  // Step 5, piece 1 - the pipe to the real backend. The renderer never
+  // calls the backend itself; it only ever asks main to do it.
+  backend: {
+    checkHealth: (): Promise<BackendHealthResult> => ipcRenderer.invoke("backend:checkHealth"),
+    createSession: (): Promise<BackendSessionResult> => ipcRenderer.invoke("backend:createSession")
+  }
 };
 
 if (process.contextIsolated) {

@@ -9,6 +9,7 @@ import { importLibraryFromCsvText } from "./library/importLibrary.ts";
 import { replaceAllTracks, countTracks, getSampleTracks, getTrackLocation } from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
 import { appendHistoryEntry, listHistory } from "./db/history.ts";
+import { checkBackendHealth, createBackendSession } from "./backendClient.ts";
 
 function buildImportSummary(db: Database.Database, imported: ReturnType<typeof importLibraryFromCsvText>) {
   const blankLinesSkipped = imported.rejected.filter((r) => r.isBlankLine).length;
@@ -100,4 +101,11 @@ export function registerWindowIpc(): void {
     window?.setAlwaysOnTop(!!flag);
     return window?.isAlwaysOnTop() ?? false;
   });
+}
+
+// Step 5, piece 1 - the pipe to the real backend. No AI call lives here;
+// this only proves the connection itself works.
+export function registerBackendIpc(): void {
+  ipcMain.handle("backend:checkHealth", () => checkBackendHealth());
+  ipcMain.handle("backend:createSession", () => createBackendSession());
 }

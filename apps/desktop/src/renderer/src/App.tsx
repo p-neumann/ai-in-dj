@@ -6,6 +6,7 @@
 // live, in the actually-running app.
 
 import { useEffect, useState } from "react";
+import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 
 type Check = {
   label: string;
@@ -103,8 +104,9 @@ export default function App(): React.JSX.Element {
       <h1>Desktop shell</h1>
       <p>
         Step 1: window opens with the security locks on. Step 2: a real local database. Step 3: real library
-        import, saved for good. Step 4 (below): the rest of the locked-door bridge - preferences, history, reveal
-        in Finder, always on top. Next: the real screens.
+        import, saved for good. Step 4: the rest of the locked-door bridge - preferences, history, reveal in
+        Finder, always on top. Step 5, piece 1 (below): a real, proven connection to the backend server - no AI
+        involved yet, just the pipe. Next: the real screens, one at a time.
       </p>
 
       <section
@@ -168,6 +170,7 @@ export default function App(): React.JSX.Element {
       <PreferencesSection />
       <HistorySection />
       <AlwaysOnTopSection />
+      <BackendConnectionSection />
     </main>
   );
 }
@@ -273,6 +276,71 @@ function AlwaysOnTopSection(): React.JSX.Element {
       <label>
         <input type="checkbox" checked={pinned} onChange={handleToggle} /> Pin this window above other windows
       </label>
+    </section>
+  );
+}
+
+type BackendState =
+  | { status: "checking" }
+  | { status: "reachable" }
+  | { status: "unreachable"; error?: string }
+  | { status: "session-created"; sessionId: string }
+  | { status: "session-error"; error?: string };
+
+function BackendConnectionSection(): React.JSX.Element {
+  const [state, setState] = useState<BackendState>({ status: "checking" });
+
+  async function checkNow(): Promise<void> {
+    setState({ status: "checking" });
+    const health = await checkBackendHealth();
+    setState(health.reachable ? { status: "reachable" } : { status: "unreachable", error: health.error });
+  }
+
+  useEffect(() => {
+    checkNow();
+  }, []);
+
+  async function handleCreateSession(): Promise<void> {
+    const result = await createBackendSession();
+    setState(
+      result.ok && result.sessionId
+        ? { status: "session-created", sessionId: result.sessionId }
+        : { status: "session-error", error: result.error }
+    );
+  }
+
+  return (
+    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
+      <h2 style={{ marginTop: 0 }}>Step 5, piece 1: backend connection</h2>
+      <p style={{ fontSize: 13, color: "#666" }}>
+        No AI involved here - this only proves the app can reach the real backend server (started separately with{" "}
+        <code>npm start</code> in <code>apps/server</code>) and get a real response back.
+      </p>
+
+      {state.status === "checking" && <p>Checking...</p>}
+      {state.status === "reachable" && <p style={{ color: "#2e7d32" }}>✓ Connected to the backend server.</p>}
+      {state.status === "unreachable" && (
+        <p style={{ color: "#c62828" }}>
+          ✗ Not reachable{state.error ? `: ${state.error}` : ""}. Is <code>apps/server</code> running?
+        </p>
+      )}
+      {(state.status === "session-created" || state.status === "session-error") && (
+        <p style={{ color: "#2e7d32" }}>✓ Connected to the backend server.</p>
+      )}
+
+      <button onClick={checkNow} style={{ marginRight: "0.5rem" }}>
+        Check again
+      </button>
+      <button onClick={handleCreateSession}>Create a real session</button>
+
+      {state.status === "session-created" && (
+        <p style={{ marginTop: "0.5rem" }}>
+          Real session created: <code>{state.sessionId}</code>
+        </p>
+      )}
+      {state.status === "session-error" && (
+        <p style={{ marginTop: "0.5rem", color: "#c62828" }}>Session creation failed: {state.error}</p>
+      )}
     </section>
   );
 }
