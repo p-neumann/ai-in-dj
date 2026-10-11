@@ -45,11 +45,24 @@ interface CcdjBackendSessionResult {
   error?: string;
 }
 
+interface CcdjLibraryRow {
+  id: number;
+  displayName: string;
+  artist: string;
+  title: string;
+  bpm: number;
+  key: string;
+  genre: string;
+  year: number;
+  playcount: number | null;
+}
+
 interface Window {
   ccdj: {
     library: {
       importFromFile: () => Promise<CcdjLibraryImportResult>;
       getStatus: () => Promise<CcdjLibraryStatus>;
+      getAllTracks: () => Promise<CcdjLibraryRow[]>;
     };
     prefs: {
       get: (key: string) => Promise<string | null>;

@@ -137,9 +137,34 @@ A real, proven HTTP connection from this app to the backend server, following CL
 - **Checked the real compiled renderer bundle specifically for this piece** (not just the old gate): zero hits for the dev token, and zero hits for the backend URL, anywhere in `out/renderer/assets/*.js` - confirming the architecture actually holds in the real build, not just in intent. The security gate (`window.storage`/`api.anthropic.com`) still holds too.
 - Sanity-checked the real backend server directly (`curl`) against the exact calls the app will make - `/healthz` and `POST /v1/sessions` with the real dev token both responded correctly - before handing this to Ranjish, so a real-window failure would point clearly at the Electron side, not an unrelated server issue.
 
+### Real-window check (Ranjish, confirmed)
+Connection worked. Piece 1 confirmed working, for real.
+
+---
+
+## Step 5, piece 2 — the real Library screen (commit pending)
+
+### Two speed questions, answered with real measurements before building anything
+Ranjish asked these before any code was written, not after - both measured directly against the real ~38,484-track library:
+
+1. **Does `tracks` have indexes for searching?** No. Measured plain substring search (`LIKE`) for "punk," "daft," "the" (worst case), and even an unfiltered fetch of all 38,484 rows: **7-12ms every time** - about 20x under CLAUDE.md's own 200ms/75k target. Also measured SQLite's FTS5 (full-text search) for comparison: **0-2ms** - genuinely faster, but not something a person could feel while typing. A plain index wouldn't help this query shape anyway (a leading-wildcard `LIKE` can't use one). **Decision: no index, no FTS5** - real, measured complexity-for-no-benefit at this size; FTS5 is the right tool to reach for later if the library grows far larger and search measurably slows down, not now.
+2. One more real number that shaped the actual design: moving all 38,484 rows out of the database and across to the screen takes **~50-60ms total**. Cheap enough to do **once** when the screen opens; doing it on every keystroke would add a small but real lag while typing fast. So: fetch once, then search **instantly in the screen's own memory** from there - measurably faster overall than re-querying the database per keystroke, not slower.
+
+### What was built
+- `db/tracks.ts`'s `getAllTracksForLibrary` - one query, returns every track with only the fields the screen needs (no `location`/`extra` - keeps the one-time transfer lean).
+- `library:getAllTracks` IPC function (main-owned, same pattern as every other IPC function so far).
+- `renderer/src/library/filterTracks.ts` - the actual search logic, a small pure function (case-insensitive substring match across displayName/artist/title) so it's directly unit-testable without any React/DOM involved.
+- `renderer/src/library/LibraryScreen.tsx` - the real screen: a search box, a live "Showing X of Y tracks" count, and a **virtualized** scrollable list using `@tanstack/react-virtual` (a small, well-established library chosen deliberately over hand-rolling the scroll math, which has real, easy-to-get-wrong edge cases). Only the rows actually visible in the scroll viewport are ever real DOM elements - CLAUDE.md's own R25 limitation ("Library list | only 500 rows") is now removed; all 38,484 tracks scroll, not just the first 500.
+- Refreshes automatically after a new library import (via a simple refresh-signal counter), not just once at app start.
+
+### Verification done
+- 50/50 tests pass (5 new: `getAllTracksForLibrary` returns the right lean fields; `filterTracks`'s 4 cases - empty search returns everything, case-insensitive substring match, matches artist/title too not just displayName, no match returns an empty list cleanly).
+- Typecheck clean, build succeeds. Security gate re-checked: still 0 hits for `window.storage`/`api.anthropic.com` in the real compiled output.
+- `@tanstack/react-virtual` installed clean: 0 vulnerabilities.
+
 ### Real-window check - waiting on Ranjish before this gets committed
-1. Start the real backend: `cd apps/server`, then `npm start` (confirm it logs `provider: mock` - `LIVE_AI_CALLS` must stay `false`).
-2. In another terminal: `cd apps/desktop`, then `npm run dev`.
-3. The "Step 5, piece 1" section should show **"✓ Connected to the backend server"** within a second or two.
-4. Click "Create a real session" - expect a real session ID to appear (starts with `s_`).
-5. Stop the server (Ctrl+C in its terminal), then click "Check again" - expect it to switch to **"✗ Not reachable"** instead of crashing the app.
+Run `npm run dev` from `apps/desktop` (the backend server doesn't need to be running for this piece - no AI, no backend call involved).
+- The new "Step 5, piece 2: Library" section should show **"Showing 38,484 of 38,484 tracks"** (re-import `Crates.csv` first via the Step 3 button if your saved library is currently the 2-row test fixture from an earlier check).
+- Scroll the list - it should feel smooth the whole way through, not jerky or frozen, even though there are tens of thousands of rows.
+- Type "daft" into the search box - expect it to narrow near-instantly (no visible lag) to real Daft Punk tracks.
+- Clear the search - expect it to snap back to the full count immediately.

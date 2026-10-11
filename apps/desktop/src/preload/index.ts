@@ -49,10 +49,23 @@ export interface BackendSessionResult {
   error?: string;
 }
 
+export interface LibraryRow {
+  id: number;
+  displayName: string;
+  artist: string;
+  title: string;
+  bpm: number;
+  key: string;
+  genre: string;
+  year: number;
+  playcount: number | null;
+}
+
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
-    getStatus: (): Promise<LibraryStatus> => ipcRenderer.invoke("library:getStatus")
+    getStatus: (): Promise<LibraryStatus> => ipcRenderer.invoke("library:getStatus"),
+    getAllTracks: (): Promise<LibraryRow[]> => ipcRenderer.invoke("library:getAllTracks")
   },
   prefs: {
     get: (key: string): Promise<string | null> => ipcRenderer.invoke("prefs:get", key),

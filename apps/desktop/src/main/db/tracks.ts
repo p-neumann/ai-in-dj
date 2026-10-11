@@ -52,3 +52,31 @@ export function getTrackLocation(db: Database.Database, trackId: number): string
     | undefined;
   return row ? row.location : null;
 }
+
+export interface LibraryRow {
+  id: number;
+  displayName: string;
+  artist: string;
+  title: string;
+  bpm: number;
+  key: string;
+  genre: string;
+  year: number;
+  playcount: number | null;
+}
+
+// Step 5, piece 2 (Library screen). Measured directly against the real
+// ~38,484-track library before choosing this: fetching every row with no
+// filter takes ~7-10ms at the database level, and transferring that many
+// rows out takes ~50-60ms total - cheap enough to do ONCE when the screen
+// opens, then search instantly in the renderer's own memory, rather than
+// round-tripping to the database on every keystroke (which measured
+// slower overall for fast typing, not faster). No search-specific SQL,
+// no index, no FTS5 - deliberately: a leading-wildcard LIKE search can't
+// use a plain index anyway, and FTS5 only measured ~8ms faster than plain
+// LIKE at this size, not something a person could feel while typing.
+export function getAllTracksForLibrary(db: Database.Database): LibraryRow[] {
+  return db
+    .prepare("SELECT id, displayName, artist, title, bpm, key, genre, year, playcount FROM tracks")
+    .all() as LibraryRow[];
+}

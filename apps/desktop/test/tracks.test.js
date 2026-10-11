@@ -11,7 +11,8 @@ const {
   countTracks,
   getSampleTrackNames,
   getSampleTracks,
-  getTrackLocation
+  getTrackLocation,
+  getAllTracksForLibrary
 } = require("../src/main/db/tracks.ts");
 
 function sampleTrack(n) {
@@ -81,5 +82,17 @@ test("getTrackLocation: returns the real path for a known id, and null for an un
   const [track] = getSampleTracks(db, 1);
   assert.equal(getTrackLocation(db, track.id), "/Music/Song 1.mp3");
   assert.equal(getTrackLocation(db, 999999), null, "an id the renderer made up must never resolve to a real path");
+  db.close();
+});
+
+test("getAllTracksForLibrary: returns every track with the fields the Library screen needs, no location/extra", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1), sampleTrack(2), sampleTrack(3)]);
+
+  const rows = getAllTracksForLibrary(db);
+  assert.equal(rows.length, 3);
+  const [row] = rows;
+  assert.deepEqual(Object.keys(row).sort(), ["artist", "bpm", "displayName", "genre", "id", "key", "playcount", "title", "year"].sort());
   db.close();
 });

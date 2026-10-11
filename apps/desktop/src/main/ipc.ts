@@ -6,7 +6,13 @@ import { ipcMain, dialog, shell, BrowserWindow } from "electron";
 import { readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { importLibraryFromCsvText } from "./library/importLibrary.ts";
-import { replaceAllTracks, countTracks, getSampleTracks, getTrackLocation } from "./db/tracks.ts";
+import {
+  replaceAllTracks,
+  countTracks,
+  getSampleTracks,
+  getTrackLocation,
+  getAllTracksForLibrary
+} from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
 import { appendHistoryEntry, listHistory } from "./db/history.ts";
 import { checkBackendHealth, createBackendSession } from "./backendClient.ts";
@@ -56,6 +62,11 @@ export function registerLibraryIpc(db: Database.Database): void {
     const count = countTracks(db);
     return { count, sampleTracks: count > 0 ? getSampleTracks(db, 5) : [] };
   });
+
+  // Step 5, piece 2 - the real Library screen. One fetch of everything;
+  // the renderer searches/filters in its own memory from there (see
+  // db/tracks.ts's getAllTracksForLibrary for the measured reasoning).
+  ipcMain.handle("library:getAllTracks", () => getAllTracksForLibrary(db));
 }
 
 // Step 4 - preferences: a permanent setting survives a restart.

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
+import LibraryScreen from "./library/LibraryScreen";
 
 type Check = {
   label: string;
@@ -61,6 +62,7 @@ export default function App(): React.JSX.Element {
   const allPass = checks.every((c) => c.pass);
 
   const [importState, setImportState] = useState<ImportState>({ status: "loading" });
+  const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
 
   // On startup, show whatever was already imported and saved, rather than
   // looking empty until the DJ re-imports a file that's genuinely already
@@ -88,6 +90,7 @@ export default function App(): React.JSX.Element {
         totalRows: result.totalRows ?? 0,
         sampleTracks: result.sampleTracks ?? []
       });
+      setLibraryRefreshSignal((n) => n + 1);
     } catch (error) {
       setImportState({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
@@ -104,9 +107,9 @@ export default function App(): React.JSX.Element {
       <h1>Desktop shell</h1>
       <p>
         Step 1: window opens with the security locks on. Step 2: a real local database. Step 3: real library
-        import, saved for good. Step 4: the rest of the locked-door bridge - preferences, history, reveal in
-        Finder, always on top. Step 5, piece 1 (below): a real, proven connection to the backend server - no AI
-        involved yet, just the pipe. Next: the real screens, one at a time.
+        import, saved for good. Step 4: the rest of the locked-door bridge. Step 5, piece 1: a real, proven
+        connection to the backend server, no AI yet. Step 5, piece 2 (below): the real, searchable, virtualized
+        Library screen - all tracks scroll smoothly, not just the first 500. Next: Track Cheat.
       </p>
 
       <section
@@ -166,6 +169,8 @@ export default function App(): React.JSX.Element {
 
         <SampleTrackList tracks={sampleTracksToShow} />
       </section>
+
+      <LibraryScreen refreshSignal={libraryRefreshSignal} />
 
       <PreferencesSection />
       <HistorySection />
