@@ -80,3 +80,14 @@ export function getAllTracksForLibrary(db: Database.Database): LibraryRow[] {
     .prepare("SELECT id, displayName, artist, title, bpm, key, genre, year, playcount FROM tracks")
     .all() as LibraryRow[];
 }
+
+// Step 5, piece 3 (Track Cheat), revised per Ranjish's real-library test:
+// the backend no longer gets the library inline on every recommend call
+// (that's what produced the real 413 - see docs/decisions/0009). The
+// desktop app now syncs the library to the backend ONCE (reusing this
+// same lean, no-location shape already built for the Library screen -
+// CLAUDE.md 5.4's privacy rule: send displayName, never a real path),
+// and every recommend call afterward refers to it by libraryRevision
+// only. getAllTracksForLibrary (above) IS the sync payload shape now -
+// no separate "backend" projection needed, and no location ever leaves
+// this process.

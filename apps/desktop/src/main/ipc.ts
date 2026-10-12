@@ -6,16 +6,15 @@ import { ipcMain, dialog, shell, BrowserWindow } from "electron";
 import { readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { importLibraryFromCsvText } from "./library/importLibrary.ts";
-import {
-  replaceAllTracks,
-  countTracks,
-  getSampleTracks,
-  getTrackLocation,
-  getAllTracksForLibrary
-} from "./db/tracks.ts";
+import { replaceAllTracks, countTracks, getSampleTracks, getTrackLocation, getAllTracksForLibrary } from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
 import { appendHistoryEntry, listHistory } from "./db/history.ts";
-import { checkBackendHealth, createBackendSession } from "./backendClient.ts";
+import {
+  checkBackendHealth,
+  createBackendSession,
+  recommendTrackCheatWithAutoSync,
+  type BackendTrackCheatResult
+} from "./backendClient.ts";
 
 function buildImportSummary(db: Database.Database, imported: ReturnType<typeof importLibraryFromCsvText>) {
   const blankLinesSkipped = imported.rejected.filter((r) => r.isBlankLine).length;
@@ -28,6 +27,14 @@ function buildImportSummary(db: Database.Database, imported: ReturnType<typeof i
     sampleTracks: getSampleTracks(db, 5)
   };
 }
+
+// Step 5, piece 3 (docs/decisions/0009): the backend forgets its synced
+// library on restart (in-memory only, same as session state) - so a
+// cached revision from an earlier run can go stale at any time, not just
+// after a new import. Module-level on purpose: shared between the
+// import handler (which invalidates it) and the recommend handler
+// (which syncs/retries using it) below.
+let cachedLibraryRevision: number | null = null;
 
 // Step 3 (library import) - taking no renderer-supplied path at all; the
 // file comes from a native OS dialog the main process controls.
@@ -52,6 +59,9 @@ export function registerLibraryIpc(db: Database.Database): void {
     // One transaction, whole-table replace (db/tracks.ts) - re-importing
     // the same file twice must leave the count unchanged, never doubled.
     replaceAllTracks(db, imported.tracks);
+    // The content just changed - any cached revision now describes the
+    // OLD library. Forces a fresh sync before the next recommend call.
+    cachedLibraryRevision = null;
 
     return { cancelled: false as const, ...buildImportSummary(db, imported) };
   });
@@ -116,7 +126,29 @@ export function registerWindowIpc(): void {
 
 // Step 5, piece 1 - the pipe to the real backend. No AI call lives here;
 // this only proves the connection itself works.
-export function registerBackendIpc(): void {
+// Step 5, piece 3 - Track Cheat. docs/decisions/0009: the actual
+// sync-if-needed / resync-and-retry-once-on-LIBRARY_OUT_OF_SYNC logic
+// lives in backendClient.ts's recommendTrackCheatWithAutoSync (so it can
+// be unit-tested without a real IPC/Electron environment). This handler
+// only owns the one piece that's genuinely tied to app lifetime: where
+// the cached revision lives between calls.
+export function registerBackendIpc(db: Database.Database): void {
   ipcMain.handle("backend:checkHealth", () => checkBackendHealth());
   ipcMain.handle("backend:createSession", () => createBackendSession());
+
+  ipcMain.handle(
+    "backend:recommendTrackCheat",
+    async (
+      _event,
+      params: { seedTrackId: number; vibe: number; energy: number; playCountMode: string }
+    ): Promise<BackendTrackCheatResult> => {
+      const { result, revision } = await recommendTrackCheatWithAutoSync(
+        () => getAllTracksForLibrary(db),
+        cachedLibraryRevision,
+        params
+      );
+      cachedLibraryRevision = revision;
+      return result;
+    }
+  );
 }

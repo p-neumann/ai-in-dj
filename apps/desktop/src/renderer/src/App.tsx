@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 import LibraryScreen from "./library/LibraryScreen";
+import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 
 type Check = {
   label: string;
@@ -109,7 +110,9 @@ export default function App(): React.JSX.Element {
         Step 1: window opens with the security locks on. Step 2: a real local database. Step 3: real library
         import, saved for good. Step 4: the rest of the locked-door bridge. Step 5, piece 1: a real, proven
         connection to the backend server, no AI yet. Step 5, piece 2 (below): the real, searchable, virtualized
-        Library screen - all tracks scroll smoothly, not just the first 500. Next: Track Cheat.
+        Library screen - all tracks scroll smoothly, not just the first 500. Step 5, piece 3 (below): Track
+        Cheat core - seed, sliders, one real recommend call through the already-built backend. Next:
+        daisy-chain/votes.
       </p>
 
       <section
@@ -171,6 +174,7 @@ export default function App(): React.JSX.Element {
       </section>
 
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
+      <TrackCheatScreen />
 
       <PreferencesSection />
       <HistorySection />

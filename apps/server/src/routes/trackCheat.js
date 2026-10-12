@@ -57,8 +57,14 @@ import {
   applyTypeLock, injectTypeLockBalance
 } from "../engine/typeLock.js";
 import { getSession } from "../session/sessionStore.js";
+import { getLibraryForRevision } from "../library/libraryStore.js";
 
 export class ValidationError extends Error {}
+// CLAUDE.md Section 6.3's own documented error code - a client holding a
+// stale or never-synced libraryRevision is told plainly to resync and
+// retry, not served results that silently don't match what it thinks it
+// sent.
+export class LibraryOutOfSyncError extends Error {}
 
 function buildRequestBody(seedName, ctx, system, allEx, likedNames) {
   const seedTitleWords = seedName.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
@@ -121,13 +127,31 @@ function makeBatchId() {
 
 export async function recommendTrackCheat(request, provider) {
   const {
-    library, seedTrackId, vibe = -3, energy = 0, exclude = [],
+    library: inlineLibrary, libraryRevision = null, seedTrackId, vibe = -3, energy = 0, exclude = [],
     playCountMode = "mix", styleProfile: requestStyleProfile = null, styleProfileEnrichment: requestStyleProfileEnrichment = null,
     vibePromptText = "", sessionId = null, clientSeq = null, expectedStateVersion = null
   } = request;
 
+  // Two ways a caller can supply the library: inline (small test
+  // fixtures, every existing test, unchanged) or by libraryRevision
+  // (the real desktop app, after a one-time sync - CLAUDE.md Phase 5's
+  // "sync client"). Checked in this order so inline keeps working
+  // exactly as before for anyone still using it.
+  let library = inlineLibrary;
   if (!Array.isArray(library) || library.length === 0) {
-    throw new ValidationError("library must be a non-empty array");
+    if (libraryRevision !== null && libraryRevision !== undefined) {
+      const synced = getLibraryForRevision(libraryRevision);
+      if (!synced) {
+        throw new LibraryOutOfSyncError(
+          "libraryRevision " + libraryRevision + " is stale or was never synced - resync via POST /v1/library/sync and retry"
+        );
+      }
+      library = synced;
+    }
+  }
+
+  if (!Array.isArray(library) || library.length === 0) {
+    throw new ValidationError("library must be a non-empty array (or provide a valid libraryRevision)");
   }
   const seedTrack = library.find((t) => t.id === seedTrackId);
   if (!seedTrack) {

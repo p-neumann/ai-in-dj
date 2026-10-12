@@ -129,7 +129,7 @@ if (gotSingleInstanceLock) {
     registerHistoryIpc(db);
     registerFileIpc(db);
     registerWindowIpc();
-    registerBackendIpc();
+    registerBackendIpc(db);
     createWindow();
 
     // macOS keeps an app running with no open windows; clicking the dock

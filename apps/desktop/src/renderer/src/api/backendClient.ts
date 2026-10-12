@@ -12,3 +12,12 @@ export function checkBackendHealth(): Promise<CcdjBackendHealthResult> {
 export function createBackendSession(): Promise<CcdjBackendSessionResult> {
   return window.ccdj.backend.createSession();
 }
+
+export function recommendTrackCheat(params: {
+  seedTrackId: number;
+  vibe: number;
+  energy: number;
+  playCountMode: string;
+}): Promise<CcdjTrackCheatResult> {
+  return window.ccdj.backend.recommendTrackCheat(params);
+}

@@ -3,6 +3,12 @@
 // preserve-behavior rationale.
 
 export function getDisplayName(t) {
+  // Trust an already-computed name first (added for library sync -
+  // CLAUDE.md 5.4: the client sends displayName, never the real file
+  // path, so there's no location to recompute from for a synced track).
+  // Purely additive: any track without this field falls through to the
+  // exact original logic below, unchanged.
+  if (t.displayName) return t.displayName;
   if (t.location) {
     var p = t.location.replace(/\\/g, "/").split("/");
     return p[p.length - 1].replace(/\.[^.]+$/, "");

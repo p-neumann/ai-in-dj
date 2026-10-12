@@ -6,10 +6,11 @@
 
 import Fastify from "fastify";
 import { checkDevToken } from "./auth/devToken.js";
-import { recommendTrackCheat, ValidationError } from "./routes/trackCheat.js";
+import { recommendTrackCheat, ValidationError, LibraryOutOfSyncError } from "./routes/trackCheat.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerCrateRoutes } from "./routes/crates.js";
 import { registerPreferencesRoutes } from "./routes/preferences.js";
+import { registerLibraryRoutes } from "./routes/library.js";
 import { createMockProvider } from "./providers/mockProvider.js";
 import { mapProviderError } from "./providers/providerErrors.js";
 
@@ -34,6 +35,7 @@ export function buildApp(config = {}) {
   registerSessionRoutes(app);
   registerCrateRoutes(app, provider);
   registerPreferencesRoutes(app, provider);
+  registerLibraryRoutes(app);
 
   app.post("/v1/track-cheat/recommend", async (request, reply) => {
     try {
@@ -43,6 +45,10 @@ export function buildApp(config = {}) {
       if (err instanceof ValidationError) {
         reply.code(400);
         return { ok: false, error: { code: "VALIDATION", message: err.message } };
+      }
+      if (err instanceof LibraryOutOfSyncError) {
+        reply.code(409);
+        return { ok: false, error: { code: "LIBRARY_OUT_OF_SYNC", message: err.message } };
       }
       request.log?.error?.(err);
       const mapped = mapProviderError(err);

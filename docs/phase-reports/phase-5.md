@@ -162,9 +162,63 @@ Ranjish asked these before any code was written, not after - both measured direc
 - Typecheck clean, build succeeds. Security gate re-checked: still 0 hits for `window.storage`/`api.anthropic.com` in the real compiled output.
 - `@tanstack/react-virtual` installed clean: 0 vulnerabilities.
 
+### Real-window check (Ranjish, confirmed)
+38,484/38,484 shown, scrolling smooth, "daft" narrowed instantly, clearing snapped back immediately. Also confirmed before committing: `npm audit` → 0 vulnerabilities, `@tanstack/react-virtual@3.14.15` installed. Piece 2 is not yet styled to Mike's real look (confirmed, deliberate - the visual port is separate, later work) - piece 2 only proves the mechanics.
+
+---
+
+## Step 5, piece 3 — Track Cheat core (commit pending)
+
+### Confirmed before building anything (Ranjish's own check)
+The recommendation logic is already built and tested in the backend - that was Phase 3/4's job, not this one. This piece adds only the screen (seed, sliders, button) and wires it to the already-existing `POST /v1/track-cheat/recommend` route; it changes nothing in `apps/server`. Follows `CLAUDE.md`'s own Phase 5 line: *"replace every `window.storage` use and every direct Anthropic `fetch` with the typed API client."* No session yet - chain/bridge/drift/daisy-chain memory is piece 4, kept deliberately separate (the real route runs fully stateless without a `sessionId`, which is its own documented behavior, not a shortcut taken here).
+
+### What was built (first pass)
+- `db/tracks.ts`'s `getAllTracksForBackend` - the fields the real `recommendTrackCheat` route actually reads (including `location`, needed to derive the same display name already computed at import time) - read fresh from this process's own database on every call, never passed through the renderer (same reasoning as piece 1).
+- `backendClient.ts`'s `recommendTrackCheat` - posts to the real route, same auth pattern as every other call so far.
+- `renderer/src/trackCheat/vibeLabels.ts` - Mike's real vibe-slider labels (`-8` "Vibe Lock" through `+8` "Total Chaos"), copied character-for-character from the reference spec's own `VIBE_LABELS` object, not reworded. Vibe `0` shows **no label**, matching the original app's own behavior (its label lookup genuinely returns nothing at 0) - not an invented placeholder.
+- `renderer/src/trackCheat/TrackCheatScreen.tsx` - seed search (reuses the same `filterTracks` function from piece 2), vibe slider (-8..+8) with the real label and description shown live, energy slider (-16..+16), play-count mode (familiar/mix/deep), a results list showing name/bpm/key/lane, and the honest diagnostic line CLAUDE.md's own contract already returns: candidate pool size, fallback depth, requested vs. returned, and whether the call was real or simulated.
+
+### First-pass verification
+- 58/58 tests pass (8 new: Mike's real vibe labels locked in against the reference spec at -8/0/+5/+8; `getAllTracksForBackend`'s exact field set; `recommendTrackCheat`'s request shape - confirms the library array and every field name match what the real server route expects; a server-reported failure handled as a clear error; a network error caught, never thrown).
+- Typecheck clean, build succeeds.
+- Security gate re-checked, including the new surface: still 0 hits for `window.storage`/`api.anthropic.com`, and - specifically re-checked since this piece added more backend calls - still 0 hits for the dev token or the backend URL anywhere in the real compiled renderer bundle.
+- **Sanity-checked the exact request shape against the real, running server** (mock provider, `LIVE_AI_CALLS=false`, untouched) before handing this to Ranjish: posted the same library/seedTrackId/vibe/energy/playCountMode shape the app will send, got back a real, valid simulated result. Server process stopped immediately after.
+
+### Real bug found by Ranjish testing against his real 38,484-track library: HTTP 413
+
+Seed picking, vibe labels, and sliders all worked. "Get Recommendations" failed with `Error: HTTP 413`. Root cause, confirmed directly: the app sent the entire library inline on every recommend call, and that request body exceeded Fastify's default ~1MB limit once the library was Ranjish's real size, not the small test library the first-pass tests used. Explicit instruction: **don't just raise the limit** - that would hide the real problem (a request that grows without bound as the library grows) instead of fixing it.
+
+#### The fix, explained plainly, agreed before building
+
+The library doesn't need to travel on every recommend call - it only changes when the DJ imports or re-imports. So: **sync it to the server once, then every recommend call afterward just says "use revision #5," not the whole library again.**
+
+1. A new route, `POST /v1/library/sync`, takes the whole library and gives back a `libraryRevision` number. It has its **own**, much larger size limit (30MB) - `recommend`'s own limit is untouched.
+2. `recommend` now accepts a `libraryRevision` instead of the library itself. Its request body stays tiny (a seed id and a few numbers) no matter how big the library is.
+3. This is a **full-replace sync, not true incremental diffing** - every sync sends the whole library again, it doesn't compute "what changed since last time." CLAUDE.md's own fuller design (upserts/deletes against a last-known revision) is real work this doesn't build. Full replace was chosen because the desktop app already has the complete, current library in SQLite at all times, and syncing only happens rarely (app start, or right after a re-import) - not on every keystroke or every recommend call - so the extra complexity of real diffing isn't earning its cost yet. Written up in full in `docs/decisions/0009`.
+4. **The server forgets the synced library on restart** (in-memory only, same as its existing session store) - so a `libraryRevision` the app is holding can go stale at any time, not just after a new import. When that happens, the server returns `LIBRARY_OUT_OF_SYNC` (a code CLAUDE.md's own Section 6.3 already documents for exactly this). The desktop app detects that specific error, **automatically resyncs once, and retries** - the DJ never sees a raw error for something the app can fix itself.
+5. **Privacy, confirmed directly, not assumed:** the sync payload is the exact same lean shape already built for the Library screen in piece 2 (`id, displayName, artist, title, bpm, key, genre, year, playcount`) - it has never included `location`/file paths. The server also strips any `location` field from a synced payload anyway, as a second layer of protection, proven by a dedicated test (`libraryStore.test.js`) that sends a fake path on purpose and confirms it's never stored.
+
+#### What changed to build this
+- `apps/server/src/library/libraryStore.js` (new) - the in-memory, full-replace store.
+- `apps/server/src/routes/library.js` (new) - the sync route, 30MB body limit.
+- `apps/server/src/routes/trackCheat.js` - additively accepts `libraryRevision`; throws a new `LibraryOutOfSyncError` (mapped to HTTP 409) when a revision is stale or unknown. The old inline-`library` path is untouched - existing Phase 3/4 tests still exercise it directly.
+- `apps/server/src/engine/trackNames.js`'s `getDisplayName` - additively trusts a provided `displayName` first (for location-less synced tracks), falling through to the exact original logic for anything without one.
+- `apps/desktop/src/main/db/tracks.ts` - removed `getAllTracksForBackend` entirely. `getAllTracksForLibrary` (already built for the Library screen) is now also the sync payload - one lean shape, not two.
+- `apps/desktop/src/main/backendClient.ts` - added `syncLibraryToBackend`; added `recommendTrackCheatWithAutoSync`, a plain, directly-unit-tested function that does the "sync if we don't have a revision yet, recommend, and if the server says `LIBRARY_OUT_OF_SYNC`, resync once and retry" logic - deliberately kept out of the IPC handler itself so it's testable without a real Electron environment.
+- `apps/desktop/src/main/ipc.ts` - the `backend:recommendTrackCheat` handler is now a thin wrapper: it owns only where the cached revision lives between calls (module-level state, cleared after a fresh import), and calls the tested function above for everything else.
+
+#### Verification after the fix
+- Server: **119/119 tests pass** (16 new in 3 files - `libraryStore.test.js`, `trackNames.test.js`, and `librarySync.test.js`, the real-HTTP-layer proof). The two tests that matter most for proving this is the real fix, not a bigger limit in disguise: a synthetic ~38,484-track sync succeeds and a subsequent recommend call using only `libraryRevision` succeeds too; and `recommend` **still 413s** on an oversized **inline** library, confirming its own limit was never touched.
+- Desktop: **64/64 tests pass** (rewrote the old inline-library `recommendTrackCheat` tests to the new `libraryRevision` shape; added tests for `syncLibraryToBackend` and for `recommendTrackCheatWithAutoSync`'s sync-first/skip-sync-when-cached/resync-and-retry-once/resync-failure-reported paths). Fixed a real bug in the tests' own shared fetch-stubbing helper while writing these - it restored the real `fetch` before a test's second sequential call ever fired, which only this piece's multi-call tests exposed.
+- Typecheck clean (`tsc --noEmit`, both configs), real build succeeds.
+- Security gate re-checked on the real compiled output: still 0 hits for `window.storage`/`api.anthropic.com`, and 0 hits for the dev token or the backend URL anywhere in the compiled renderer bundle - confirming the sync/resync logic, like everything else, stayed entirely on the main-process side.
+- All server and desktop test runs done with `--test-concurrency=1` (now the permanent default in both `package.json` files, per Ranjish's standing instruction after a parallel test run exhausted his laptop's memory mid-session and crashed it).
+
 ### Real-window check - waiting on Ranjish before this gets committed
-Run `npm run dev` from `apps/desktop` (the backend server doesn't need to be running for this piece - no AI, no backend call involved).
-- The new "Step 5, piece 2: Library" section should show **"Showing 38,484 of 38,484 tracks"** (re-import `Crates.csv` first via the Step 3 button if your saved library is currently the 2-row test fixture from an earlier check).
-- Scroll the list - it should feel smooth the whole way through, not jerky or frozen, even though there are tens of thousands of rows.
-- Type "daft" into the search box - expect it to narrow near-instantly (no visible lag) to real Daft Punk tracks.
-- Clear the search - expect it to snap back to the full count immediately.
+1. Start the real backend: `cd apps/server`, `npm start` (confirm it logs `provider: mock`).
+2. In another terminal: `cd apps/desktop`, `npm run dev`.
+3. In the "Step 5, piece 3: Track Cheat" section, search for a seed song and pick one from the dropdown.
+4. Move the vibe slider - confirm the label text changes (e.g. slide to -8 and see "Vibe Lock"; slide to 0 and see no label at all, same as the original app).
+5. Click "Get Recommendations" with your real, full library loaded - this is the actual regression test for the 413. Expect a short pause (the library syncs once, then the recommend call runs), then a real results list, no 413.
+6. Click "Get Recommendations" again - should be fast this time (no 413, no resync needed, since the revision is already cached).
+7. **To check the auto-resync specifically:** stop the backend server (Ctrl+C in its terminal) and start it again fresh (`npm start`) - this makes the server forget the library it had, same as a real restart mid-gig. Without restarting the desktop app, click "Get Recommendations" one more time. Expect it to still work with no visible error - the app should detect the server forgot, resync automatically, and get real results back in one click, not two.

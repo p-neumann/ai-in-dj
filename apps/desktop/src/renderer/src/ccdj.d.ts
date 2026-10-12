@@ -57,6 +57,17 @@ interface CcdjLibraryRow {
   playcount: number | null;
 }
 
+interface CcdjTrackCheatResult {
+  ok: boolean;
+  results?: Array<{ trackId: number; name: string; bpm: number; key: string; camp: string | null; lane: string | null }>;
+  candidatePoolSize?: number;
+  requested?: number;
+  returned?: number;
+  fallbackDepth?: number;
+  simulated?: boolean;
+  error?: string;
+}
+
 interface Window {
   ccdj: {
     library: {
@@ -77,6 +88,12 @@ interface Window {
     backend: {
       checkHealth: () => Promise<CcdjBackendHealthResult>;
       createSession: () => Promise<CcdjBackendSessionResult>;
+      recommendTrackCheat: (params: {
+        seedTrackId: number;
+        vibe: number;
+        energy: number;
+        playCountMode: string;
+      }) => Promise<CcdjTrackCheatResult>;
     };
   };
 }

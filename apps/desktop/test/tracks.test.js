@@ -85,7 +85,11 @@ test("getTrackLocation: returns the real path for a known id, and null for an un
   db.close();
 });
 
-test("getAllTracksForLibrary: returns every track with the fields the Library screen needs, no location/extra", () => {
+// docs/decisions/0009: this same shape is now ALSO the library-sync
+// payload (piece 3's fix for the real 413) - no separate "backend"
+// projection exists anymore, so this test doubles as proof that the
+// sync payload never carries a location, per CLAUDE.md 5.4.
+test("getAllTracksForLibrary: returns every track with the fields the Library screen (and the backend sync) needs, no location/extra", () => {
   const db = new Database(":memory:");
   runMigrations(db);
   replaceAllTracks(db, [sampleTrack(1), sampleTrack(2), sampleTrack(3)]);
@@ -94,5 +98,6 @@ test("getAllTracksForLibrary: returns every track with the fields the Library sc
   assert.equal(rows.length, 3);
   const [row] = rows;
   assert.deepEqual(Object.keys(row).sort(), ["artist", "bpm", "displayName", "genre", "id", "key", "playcount", "title", "year"].sort());
+  assert.equal(row.location, undefined, "no location must ever leave this process (CLAUDE.md 5.4)");
   db.close();
 });

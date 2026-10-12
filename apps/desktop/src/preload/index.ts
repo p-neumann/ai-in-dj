@@ -61,6 +61,17 @@ export interface LibraryRow {
   playcount: number | null;
 }
 
+export interface TrackCheatResult {
+  ok: boolean;
+  results?: Array<{ trackId: number; name: string; bpm: number; key: string; camp: string | null; lane: string | null }>;
+  candidatePoolSize?: number;
+  requested?: number;
+  returned?: number;
+  fallbackDepth?: number;
+  simulated?: boolean;
+  error?: string;
+}
+
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
@@ -83,7 +94,13 @@ const api = {
   // calls the backend itself; it only ever asks main to do it.
   backend: {
     checkHealth: (): Promise<BackendHealthResult> => ipcRenderer.invoke("backend:checkHealth"),
-    createSession: (): Promise<BackendSessionResult> => ipcRenderer.invoke("backend:createSession")
+    createSession: (): Promise<BackendSessionResult> => ipcRenderer.invoke("backend:createSession"),
+    recommendTrackCheat: (params: {
+      seedTrackId: number;
+      vibe: number;
+      energy: number;
+      playCountMode: string;
+    }): Promise<TrackCheatResult> => ipcRenderer.invoke("backend:recommendTrackCheat", params)
   }
 };
 
