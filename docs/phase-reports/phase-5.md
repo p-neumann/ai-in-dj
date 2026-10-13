@@ -1,7 +1,11 @@
 # Phase 5 — Desktop shell and durable local data
 
 **Status:** In progress. First of three commit milestones complete.
-**Date of this report:** 2026-10-06 (work performed 2026-10-05). **Updated 2026-10-13:** Serato spike status (Sections 1, 4, Summary) and two new findings in Section 5. No Phase 5 code has changed since `f4ae88f`.
+**Date of this report:** 2026-10-06 (work performed 2026-10-05).
+**Update history:**
+- **2026-10-13 (first update):** Serato spike status (Sections 1, 4, Summary) and two new findings in Section 5. *At the time of this update*, no Phase 5 code had changed since `f4ae88f`. That is no longer the current status; see the later updates below.
+- **2026-10-13 (second update):** `better-sqlite3` installed and verified to load in Electron 44 without a rebuild (Section 5); `package.json`/`package-lock.json` changed. A minimal main-process load check was then added (`src/main/db/`, one call and a temporary startup log in `src/main/index.ts`) and verified through `npm run build` and a launch of the built app (Section 5).
+- **2026-10-13 (third update):** migration runner and pre-migration backup added with 11 tests (Section 3a); decision 0006 recorded (Section 6).
 **Branch:** `hannah/phase5-desktop` (based on `ranjish/ccdj-desktop`, pushed)
 **AI calls used while doing this work:** none. Nothing in this milestone calls a model, and `apps/desktop` has no provider dependency of any kind.
 
@@ -10,7 +14,7 @@ Phase 5's three commit milestones per CLAUDE.md Section 9:
 | Milestone | State |
 |---|---|
 | `feat(desktop): electron shell` | **Done** (`f4ae88f`) |
-| `feat(desktop): sqlite persistence` | Not started |
+| `feat(desktop): sqlite persistence` | Started — `better-sqlite3` loads from the built app's main process (Section 5); migration runner + verified pre-migration backup implemented and tested, not yet wired to startup (Section 3a); no real database file yet |
 | `feat(desktop): library import` | Not started |
 
 ---
@@ -84,6 +88,74 @@ The sanitized copy was used deliberately. The root `CheatCodeDJ_v_1_0_22016.jsx`
 
 ---
 
+## 3a. Migration runner and pre-migration backup (2026-10-13)
+
+**Scope:** CLAUDE.md §6.2's migration and snapshot rules, as library code plus tests. **Not** connected to app startup: no real user database is created, and there are no preference tables, IPC or library tables yet. No packages installed.
+
+**Decision recorded:** `docs/decisions/0006-database-wide-schema-version.md`: one schema version for the whole database file. §6.2's "every local table has a `schema_version`" is the only per-table wording. The snapshot naming, the "database is newer than it understands" check, rollback and §11.1 all assume one version per file.
+
+**Files:**
+
+| File | Change |
+|---|---|
+| `src/main/db/schema.ts` | New. Read-only helpers: table names, schema version (`MAX(version)` from `schema_migrations`, 0 if absent), per-table row counts |
+| `src/main/db/migrations.ts` | New. Ordered migration list with the forward-only / expand→contract rules in its header. Migration 1 creates `schema_migrations(version INTEGER PRIMARY KEY, name, applied_at)` only |
+| `src/main/db/backup.ts` | New. `createVerifiedBackup`, `verifyBackup`, `backupPathFor` |
+| `src/main/db/migrate.ts` | New. `migrate(dbPath, migrations?, options?)` → `upToDate` / `migrated` / `tooNew` / `backupFailed` / `migrationFailed` |
+| `src/main/db/better-sqlite3.d.ts` | Extended with the methods now used (`exec`, `pragma`, `transaction`, `backup`, `run`, `all`) |
+| `test/db-migrate.test.mjs` | New. 11 tests |
+| `tsconfig.json` | `allowImportingTsExtensions: true`. Node's type stripping needs `.ts` in relative imports between the db modules |
+| `package.json` | Test script `node --test` → `node --experimental-strip-types --test` |
+
+**How `migrate` behaves:**
+1. It reads the version through a **read-only** connection.
+2. If the database is newer than the last migration in the list, it returns `tooNew` and writes nothing. If it is already current, it does nothing.
+3. If the file has any tables, it backs up and verifies first. On failure it returns `backupFailed` and applies nothing. A brand-new file has nothing to back up.
+4. It applies all pending migrations and their version rows in **one transaction**. On failure everything rolls back and it returns `migrationFailed` with the version that failed. A new file that fails its first migration is deleted.
+
+**How the backup is made and verified:**
+- It uses SQLite's online backup API (`db.backup()`), not a file copy, so writes still in a WAL file are included.
+- It writes to `ccdj-db.v<old>.bak.tmp`, then opens that copy read-only. `PRAGMA integrity_check` must be `ok`, the schema version must match, and every table's row count must match the source.
+- Only then is it renamed to `ccdj-db.v<old>.bak`. On any failure the temp file is deleted.
+- A same-version backup from an earlier attempt is replaced by the fresher verified one. Older-version backups are kept.
+
+**Results:**
+
+```
+npm test            # tests 18 / pass 18 / fail 0   (11 new + 7 existing)
+npm run typecheck   # exit 0
+npm run build       # exit 0 — out/main/index.js still 1.80 kB; no migration code in out/ (not imported yet)
+Phase 5 gate        # window.storage 0 hits, api.anthropic.com 0 hits
+```
+
+New tests, all in their own `%TEMP%\ccdj-migrate-test-*` folder, deleted afterwards (0 left over after the run):
+1. new file → migrated 0→1, version row recorded
+2. second run → `upToDate`; file bytes and folder listing unchanged
+3. upgrade 1→2 (test-only migration) → `ccdj-db.v1.bak` holds the v1 data without the v2 table; no `.tmp` left
+4. database at v2 opened with a v1 list → `tooNew`; file bytes and folder listing unchanged
+5. migrations 2 (succeeds) + 3 (throws) → `migrationFailed`, `failedAt: 3`; version still 1, migration 2's table rolled back, data rows intact; backup present at v1
+6. new file whose first migration throws → no file left behind
+7. backup function throws → `backupFailed`; file bytes unchanged, nothing applied
+8. verification rejects a copy with a deleted row (`row count mismatch in "sample": 2 vs 3`) and a wrong version
+9. verification rejects a non-database file
+10. backup naming matches `ccdj-db.v<old-schema>.bak`
+11. migration list must be contiguous from 1 and named
+
+These also confirm that `better-sqlite3`'s binary opens real database files under plain Node 22.16 (ABI 127), which was previously unverified. `npm test` prints two harmless Node warnings (type stripping is experimental; no `"type"` field in `package.json`). `"type": "module"` was deliberately not added, because it would change how the app and the existing `.js` tests load.
+
+The app's userData folder (`%APPDATA%\ccdj-desktop`) contains no CCDJ database. Its only `.db` files are Chromium internals from the first launch on 2026-10-05.
+
+**Not covered or unverified:**
+- Not wired to startup, and no real database location or name is fixed yet. `ccdj-db.sqlite` is used in tests only.
+- `tooNew` returns a status only. Offering to restore a compatible snapshot or quitting with instructions (§6.2) needs UI and is not built.
+- Corrupt-database recovery (§6.2) is not implemented. A file that is not a database currently makes `migrate` throw.
+- Tests use SQLite's default rollback journal, not WAL. Backup and read-only opening in WAL mode are not exercised yet. Connection pragmas (journal mode, foreign keys) come with the startup wiring.
+- No backup retention policy. Backups of each old version accumulate.
+- Not tested on a large database, on a Mac, or with two app instances opening the file at once.
+- The tests were not mutation-checked, i.e. not seen to fail against deliberately broken code. All 11 passed on the first run.
+
+---
+
 ## 4. Not started, unverified, or blocked
 
 **The Serato spike (Phase 2S) — updated 2026-10-13.** Run on 2026-10-07 and 2026-10-12/13 on Serato DJ Lite 4.0.10.213, Windows 11, demo tracks only; full evidence in `docs/serato-spike.md`. All four checks now have answers on that platform:
@@ -118,14 +190,56 @@ Still open: nothing is verified on macOS or on Mike's Serato version (questions 
 
 **The Electron postinstall did not fetch the binary.** The package installed with `install.js` present but no `dist/` and no `path.txt`, so `npm run dev` failed with `Error: Electron uninstall` while `npm run build` succeeded — building never launches Electron. Resolved by running `node node_modules/electron/install.js` directly. If this was an environment or network restriction it will likely recur on other machines and in CI.
 
-**Native modules will need rebuilding for Electron.** Measured on this machine:
+**`better-sqlite3` loads in Electron without a rebuild (verified 2026-10-13).** The ABI numbers on this machine differ:
 
 ```
 system Node ABI : 127   (Node v22.16.0)
 Electron ABI    : 149   (Electron 44.5.1)
 ```
 
-`better-sqlite3` compiled against 127 will not load in Electron. `@electron/rebuild` is therefore required, not optional, for the SQLite milestone — which matches Phase 5's own anticipated failure mode (*"native module build errors (SQLite binding) → rebuild for Electron's Node version"*).
+An earlier version of this report concluded from this that `@electron/rebuild` was required. **That is wrong for the current release.** `better-sqlite3` v13.0.0 (2026-07-21) moved to Node-API, which is not tied to the ABI number, and ships prebuilt binaries inside the npm package (`prebuilds/win32-x64.node`, `darwin-arm64.node`, `darwin-x64.node`, …) with no install script or download step. Its release notes say the binaries "should theoretically work across different versions of Node.js and Electron"; Electron 44 is not named, so this was tested rather than assumed.
+
+What was done:
+- `npm install better-sqlite3` in `apps/desktop` → 13.0.3, added to `dependencies`. Exit 0, 0 vulnerabilities. No `build/` directory: nothing was compiled. `@electron/rebuild` was **not** installed.
+- A throwaway script, kept outside the repository, run with `node_modules\electron\dist\electron.exe` (`ELECTRON_RUN_AS_NODE` cleared). It loaded the module in the main process, queried an in-memory database, then wrote a row to a temporary file database (WAL mode) in a fresh `%TEMP%` folder, closed it, reopened it read-only, read the row back, and deleted the folder.
+
+Result (exit 0, no errors):
+
+```
+electron 44.5.1 · node 24.21.0 · ABI 149 · N-API 10 · main process: yes
+better-sqlite3 13.0.3 · sqlite_version() 3.53.4
+read-back: "electron-44" (matches the value written) · temp folder removed
+```
+
+**Windows build tools are not installed** (checked 2026-10-13): Visual Studio Build Tools 2019 is present without the C++ workload; Python 3.11.9 and 3.13.13 are present. This machine therefore cannot compile native modules. With v13's prebuilt binaries that did not matter; it would if a future dependency needs compiling.
+
+**Loaded through the app's own build (verified 2026-10-13).** Minimal integration, following §5.6/§5.7 (main process only, under `src/main/db/`):
+- `src/main/db/sqlite.ts` — `sqliteRuntimeInfo()` opens an **in-memory** database, reads `sqlite_version()`, closes it. No database file is created; no schema.
+- `src/main/db/better-sqlite3.d.ts` — minimal local type declaration (constructor, `prepare().get()`, `close()`). better-sqlite3 13 ships no TypeScript types, and no types package was installed.
+- `src/main/index.ts` — calls it once at `whenReady` and logs the result; a failure is logged, not fatal, since nothing depends on SQLite yet.
+
+**Temporary startup log (kept deliberately, Hannah, 2026-10-13).** Every launch prints `[ccdj] better-sqlite3 loaded, SQLite <version>` (or `[ccdj] better-sqlite3 failed to load: …`) from the main process. It is a temporary diagnostic: it stays until real database initialization at startup (opening the user database and running `migrate`) replaces it. That work should remove the log and `sqliteRuntimeInfo()`, or replace them with its own startup reporting. It should not be removed before then.
+
+Results:
+
+```
+npm run typecheck   # exit 0
+npm test            # tests 7 / pass 7 / fail 0
+npm run build       # exit 0 — out/main/index.js 1.80 kB (2 modules)
+```
+
+- electron-vite 5.0.0 kept the module external, as its source says it does for `package.json` `dependencies` in main/preload (`build.externalizeDeps`, default `true`): `out/main/index.js` contains `const Database = require("better-sqlite3");`. No better-sqlite3 code in `out/preload` or `out/renderer`; no `.node` file anywhere in `out/`.
+- Phase 5 gate re-run on `out/`: `window.storage` 0 hits, `api.anthropic.com` 0 hits.
+- Built app launched with `electron.exe .` from `apps/desktop` (runs `out/main/index.js`, no dev server, `ELECTRON_RUN_AS_NODE` cleared), stdout captured, closed after 10 s. stdout: `[ccdj] better-sqlite3 loaded, SQLite 3.53.4`; stderr empty; still running at 10 s (did not crash). The window itself was not looked at in this run.
+
+Still unverified:
+- Which binary file was loaded — almost certainly `prebuilds/win32-x64.node` (the only Windows x64 binary present), but neither run printed the path.
+- `npm run dev` with the new import (only the built output was launched).
+- ~~`npm test` (plain Node) opening a database~~ — **now verified** (Section 3a): `test/db-migrate.test.mjs` creates, migrates, backs up and reopens real database files under plain Node 22.16 (ABI 127) through `npm test`, 11/11 passing.
+- Operations that hand memory buffers between SQLite and JavaScript (e.g. `db.serialize()`, BLOBs) — Electron restricts some Node-API buffer operations; not exercised.
+- macOS (arm64 and x64).
+- **A packaged app.** No packaging tool is chosen yet (§8.8: electron-builder or Electron Forge), so none of the following has been checked: `better-sqlite3` shipped as a production dependency (it is loaded from `node_modules` at runtime); `prebuilds/*.node` placed outside `app.asar` (electron-builder states native modules are detected and unpacked automatically, but v13's `prebuilds/` layout is new; Forge needs its auto-unpack-natives plugin); the correct `darwin-arm64`/`darwin-x64` binary chosen on each Mac architecture or in a universal build; the `.node` files signed and notarized; unused Linux/Windows prebuilds (~16 MB total) excluded from the Mac build; the database file located under `app.getPath("userData")`, never inside the read-only bundle; and the §11.3 packaged-app exclusion check passing.
+- Guardrail for later work: better-sqlite3 must only be imported from `src/main`. In the sandboxed preload an externalized `require` fails, and it would break the §5.6 boundary.
 
 **`npm audit` on `apps/server` reports 9 high-severity Fastify advisories** (DoS, header spoofing via proxy headers, validation bypass) against `fastify@^4.28.1`. The fix is Fastify 5.12.5, a major version bump that would need the server's 103 tests re-run. **Not actioned** — that is the other developer's tree, and the practical risk today is low since the server binds to `localhost` and is not deployed. It should land before any Phase 6 deployment.
 
@@ -157,6 +271,7 @@ ying yang twins
 |---|---|
 | D3 — Electron + better-sqlite3 | Agreed verbally between developers. `docs/decisions/0001-stack.md` still reads **Status: Proposed** and should be moved to Accepted. |
 | Work split | Agreed in principle: `apps/server/**` and Phases 4/6/7 to one developer; `apps/desktop/**`, Serato and Playlist Cheat to the other. §1.1 still records *"split of work not yet recorded"*. Needs a record in `docs/decisions/`. |
+| Decision 0006 — one database-wide schema version | `docs/decisions/0006-database-wide-schema-version.md`, recorded 2026-10-13 as Hannah's interpretation of §6.2. **Awaiting Ranjish's review.** If Ranjish objects, a superseding record is needed before any real database is created; the migration runner (Section 3a) is built on this reading. |
 | Branch and PR convention | §10.2 specifies feature branch → PR into the default branch. `hannah/phase5-desktop` is currently based on `ranjish/ccdj-desktop` rather than `main`, so a PR now would carry 20 unrelated commits. Phase 4 should merge to `main` first. |
 
 ---
@@ -171,4 +286,4 @@ Nothing has been verified on a Mac, and no part of the UI port has been done —
 
 *Updated 2026-10-13:* the Serato spike has been run on Windows / Serato DJ Lite; all four checks have answers on that platform (Section 4), pending Mike's version and a Mac.
 
-Next: the SQLite foundation, where the ABI mismatch recorded above will be the first obstacle.
+Next: the SQLite foundation. The expected ABI obstacle did not materialise — `better-sqlite3` 13.0.3 loads in Electron 44 as installed (Section 5) — so the next step was the schema, `schema_version` and migrations (§6.2). That runner and its verified backup now exist and are tested (Section 3a). Next is wiring it into startup with the real database location and connection settings, then the first preference tables and `prefs.get/set` IPC.

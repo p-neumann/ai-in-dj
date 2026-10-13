@@ -10,6 +10,7 @@
 
 import { app, BrowserWindow, shell } from "electron";
 import { join } from "path";
+import { sqliteRuntimeInfo } from "./db/sqlite";
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -51,6 +52,14 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Phase 5 SQLite milestone, step 1: prove the native module loads here.
+  // Nothing depends on SQLite yet, so a failure is logged, not fatal.
+  try {
+    console.log(`[ccdj] better-sqlite3 loaded, SQLite ${sqliteRuntimeInfo().sqliteVersion}`);
+  } catch (err) {
+    console.error("[ccdj] better-sqlite3 failed to load:", err);
+  }
+
   createWindow();
 
   // macOS keeps the app alive with no windows; re-open on dock click.

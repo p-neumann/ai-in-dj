@@ -9,9 +9,10 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --experimental-strip-types --test"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
