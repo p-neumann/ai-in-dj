@@ -1,7 +1,7 @@
 # Phase 5 — Desktop shell and durable local data
 
 **Status:** In progress. First of three commit milestones complete.
-**Date of this report:** 2026-10-06 (work performed 2026-10-05)
+**Date of this report:** 2026-10-06 (work performed 2026-10-05). **Updated 2026-10-13:** Serato spike status (Sections 1, 4, Summary) and two new findings in Section 5. No Phase 5 code has changed since `f4ae88f`.
 **Branch:** `hannah/phase5-desktop` (based on `ranjish/ccdj-desktop`, pushed)
 **AI calls used while doing this work:** none. Nothing in this milestone calls a model, and `apps/desktop` has no provider dependency of any kind.
 
@@ -34,7 +34,7 @@ The preload additionally refuses to expose the bridge at all if `process.context
 
 **Window sizing** set to 1100×760 with minimums 900×600, labelled provisional in a code comment per Section 8.2, pending D7.
 
-**Serato DJ Lite installed** on the Windows development machine. The spike itself has **not** been run — see Section 3.
+**Serato DJ Lite installed** on the Windows development machine. The spike has since been run on Windows — see Section 4.
 
 ---
 
@@ -86,7 +86,13 @@ The sanitized copy was used deliberately. The root `CheatCodeDJ_v_1_0_22016.jsx`
 
 ## 4. Not started, unverified, or blocked
 
-**The Serato spike (Phase 2S).** All four checks in `docs/serato-spike.md` still read *Not tested*. Serato DJ Lite is installed and the spike is the next piece of non-code work. Findings will be labelled with edition and platform, since Section 8.1 warns the folder layout may differ between Windows and macOS, and the product owner runs the full version on a Mac.
+**The Serato spike (Phase 2S) — updated 2026-10-13.** Run on 2026-10-07 and 2026-10-12/13 on Serato DJ Lite 4.0.10.213, Windows 11, demo tracks only; full evidence in `docs/serato-spike.md`. All four checks now have answers on that platform:
+- **Library:** the live library is SQLite (`%LOCALAPPDATA%\Serato\Library\master.sqlite`); `_Serato_\database V2` and `.crate` files are an export written on quit. Fields (BPM, key, genre, year, play count) are available; the full-path rule is still open.
+- **Deck detection:** each load is recorded with its deck, readable from a copy of the database while Serato runs, within ~1 s.
+- **Drag:** both directions work from a sandboxed Electron window. Drag in gives the full file path only; drag out loads a deck or adds to a crate.
+- **Crate export:** a `.crate` written while Serato is closed is imported on next launch; one written while it runs is deleted at the next export — a design constraint for Phase 8e.
+
+Still open: nothing is verified on macOS or on Mike's Serato version (questions for Mike are listed in the spike doc), and the spike doc has not yet been shared with him (Phase 2S gate). None of this is Phase 5 work; Deck Watcher, drag and crate export are Phase 8.
 
 **Everything requiring a Mac.** Deck detection, two-way drag, always-on-top over Serato, code signing, notarization, and the clean-machine install test. Access is on the agenda for the 2026-10-07 meeting.
 
@@ -100,7 +106,11 @@ The sanitized copy was used deliberately. The root `CheatCodeDJ_v_1_0_22016.jsx`
 
 ## 5. Findings worth carrying forward
 
-**`CLAUDE.md` §8.1 does not say Serato is installed.** `docs/serato-spike.md` states *"Have Serato DJ installed (already true, per CLAUDE.md 8.1 - runs on Windows too)"*. §8.1 actually says *"Serato DJ runs on Windows; folder layout may differ — VERIFY"* — a statement about platform capability, not about what is installed. §12.1's Phase 2S row independently lists *"Serato installed"* as an unmet blocker, contradicting the spike doc. Neither developer had it installed; Lite has now been installed to resolve this. **The spike doc's prerequisite line should be corrected.**
+**`CLAUDE.md` §8.1 does not say Serato is installed.** `docs/serato-spike.md` states *"Have Serato DJ installed (already true, per CLAUDE.md 8.1 - runs on Windows too)"*. §8.1 actually says *"Serato DJ runs on Windows; folder layout may differ — VERIFY"* — a statement about platform capability, not about what is installed. §12.1's Phase 2S row independently lists *"Serato installed"* as an unmet blocker, contradicting the spike doc. Neither developer had it installed; Lite has now been installed to resolve this. **The spike doc's prerequisite line should be corrected.** *(Done 2026-10-07.)*
+
+**`window.open` handler opens any http/https URL (found 2026-10-12, not yet fixed).** `src/main/index.ts` passes every `http://`/`https://` URL the renderer tries to open to `shell.openExternal`. §7.5 bars `shell.openExternal` with arbitrary URLs, so this should be narrowed to an allow-list. There is also no `will-navigate` guard, although the code comment says the renderer must never navigate itself. Small, separate fix; neither is covered by `test/security.test.js` yet.
+
+**VS Code sets `ELECTRON_RUN_AS_NODE=1` in its terminals (found 2026-10-13).** With it set, `electron.exe` runs as plain Node and opens no window, failing silently. Observed while launching the Serato drag test from the IDE. If `npm run dev` ever does nothing from VS Code's terminal, clear the variable (`Remove-Item Env:ELECTRON_RUN_AS_NODE`) or use an external terminal.
 
 **Node version mismatch between development machines.** §7 records *"node -v # confirmed: v24.11.0"*. This machine runs **v22.16.0**. Nothing has broken — the server's 103 tests and all of the above pass on 22 — but the two machines should agree on a version, or §7 should record that it varies.
 
@@ -157,6 +167,8 @@ The desktop application exists and opens. Process separation and the Section 7.5
 
 The render spike then retired this phase's largest unknown: the prototype runs inside Electron, imports a full library and searches it, with only the two failures the security model is supposed to produce. Phase 5.4 is therefore a port rather than a rewrite.
 
-Nothing about Serato has been tested, nothing has been verified on a Mac, and no part of the UI port has been done — none of which is claimed otherwise anywhere above.
+Nothing has been verified on a Mac, and no part of the UI port has been done — neither of which is claimed otherwise anywhere above.
 
-Next: the Serato spike (no code, unblocked now that Lite is installed), then the SQLite foundation, where the ABI mismatch recorded above will be the first obstacle.
+*Updated 2026-10-13:* the Serato spike has been run on Windows / Serato DJ Lite; all four checks have answers on that platform (Section 4), pending Mike's version and a Mac.
+
+Next: the SQLite foundation, where the ABI mismatch recorded above will be the first obstacle.
