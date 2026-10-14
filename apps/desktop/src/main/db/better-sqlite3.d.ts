@@ -18,6 +18,7 @@ declare module "better-sqlite3" {
   interface DatabaseOptions {
     readonly?: boolean;
     fileMustExist?: boolean;
+    timeout?: number;
   }
 
   interface BackupProgress {

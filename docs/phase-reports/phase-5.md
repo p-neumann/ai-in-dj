@@ -6,6 +6,7 @@
 - **2026-10-13 (first update):** Serato spike status (Sections 1, 4, Summary) and two new findings in Section 5. *At the time of this update*, no Phase 5 code had changed since `f4ae88f`. That is no longer the current status; see the later updates below.
 - **2026-10-13 (second update):** `better-sqlite3` installed and verified to load in Electron 44 without a rebuild (Section 5); `package.json`/`package-lock.json` changed. A minimal main-process load check was then added (`src/main/db/`, one call and a temporary startup log in `src/main/index.ts`) and verified through `npm run build` and a launch of the built app (Section 5).
 - **2026-10-13 (third update):** migration runner and pre-migration backup added with 11 tests (Section 3a); decision 0006 recorded (Section 6).
+- **2026-10-13 (fourth update):** startup plan and decision 0007 committed (`f79ef3a`); connection settings (`openDatabase()`) added with 6 tests, revealing that this better-sqlite3 build's SQLite defaults differ from plain SQLite's (Section 3b).
 **Branch:** `hannah/phase5-desktop` (based on `ranjish/ccdj-desktop`, pushed)
 **AI calls used while doing this work:** none. Nothing in this milestone calls a model, and `apps/desktop` has no provider dependency of any kind.
 
@@ -14,7 +15,7 @@ Phase 5's three commit milestones per CLAUDE.md Section 9:
 | Milestone | State |
 |---|---|
 | `feat(desktop): electron shell` | **Done** (`f4ae88f`) |
-| `feat(desktop): sqlite persistence` | Started — `better-sqlite3` loads from the built app's main process (Section 5); migration runner + verified pre-migration backup implemented and tested, not yet wired to startup (Section 3a); no real database file yet |
+| `feat(desktop): sqlite persistence` | Started — `better-sqlite3` loads from the built app's main process (Section 5); migration runner + verified pre-migration backup implemented and tested (Section 3a); connection settings implemented and tested (Section 3b); not yet wired to startup; no real database file yet |
 | `feat(desktop): library import` | Not started |
 
 ---
@@ -156,6 +157,58 @@ The app's userData folder (`%APPDATA%\ccdj-desktop`) contains no CCDJ database. 
 
 ---
 
+## 3b. Connection settings (2026-10-13)
+
+**Context:**
+- The plan for opening the real database at startup is in `docs/design-notes/startup-database-init.md`.
+- Hannah's decisions on it are in `docs/decisions/0007-startup-database-initialization.md`: location, pinned user-data folder, error message then quit, single-instance lock, WAL with `synchronous=FULL`, temporary folders first.
+- Before any code, the plan was checked against the official Electron, SQLite and better-sqlite3 documentation (design note section 7). Two plan details changed: a development-only `CCDJ_USER_DATA_DIR` override replaces Chromium's undocumented `--user-data-dir` switch, and the busy timeout uses better-sqlite3's `timeout` option. Both documents were committed in `f79ef3a`.
+- This section covers **step 1 of that plan only**: the connection settings. Startup is not touched, and no real database is created.
+
+**Files:**
+
+| File | Change |
+|---|---|
+| `src/main/db/connection.ts` | New. `openDatabase(path)`: opens with `timeout: 5000` (`BUSY_TIMEOUT_MS`), sets `journal_mode = WAL` (throws unless SQLite confirms `wal`), then `synchronous = FULL` and `foreign_keys = ON`. On any failure it closes the connection before rethrowing. Not yet called by the app |
+| `src/main/db/better-sqlite3.d.ts` | Added the `timeout` constructor option |
+| `test/db-connection.test.mjs` | New. 6 tests, each in its own `%TEMP%\ccdj-connection-test-*` folder |
+
+**Results:**
+
+```
+npm test            # tests 24 / pass 24 / fail 0   (6 new + 18 existing)
+npm run typecheck   # exit 0
+npm run build       # exit 0 — output unchanged (connection.ts not imported yet)
+Phase 5 gate        # window.storage 0 hits, api.anthropic.com 0 hits
+```
+
+Tests:
+1. a new database opens in WAL mode;
+2. `synchronous` is FULL (2);
+3. the busy timeout is 5000 ms;
+4. foreign keys are on and enforced (an insert with a missing parent is rejected);
+5. WAL persists after closing, while a plain connection falls back to `synchronous = NORMAL`; reopening through `openDatabase()` restores FULL;
+6. a file that is not a database is rejected, left byte-for-byte unchanged, and not left open.
+
+0 temporary folders were left over.
+
+**Finding: this better-sqlite3 build changes SQLite's defaults.**
+- The first run of test 5 failed (23/24). It assumed a plain connection has foreign keys **off**, which is SQLite's documented default, but the connection reported **on**.
+- better-sqlite3's `docs/compilation.md` lists the bundled SQLite's compile options, including `SQLITE_DEFAULT_FOREIGN_KEYS=1` and `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`. So, in every connection this app opens:
+  - **foreign keys are on by default**;
+  - **in WAL mode, `synchronous` defaults to NORMAL**, which can lose the last committed transactions on power loss. FULL is what decision 0007 chose.
+- Test 5 was rewritten to assert the actual behaviour (24/24). `connection.ts` was not changed; it was already correct.
+
+**Consequences (not yet acted on):**
+- **`openDatabase()`'s explicit `synchronous = FULL` is essential, not redundant.** Its `foreign_keys = ON` line cannot be shown to have an effect, because the default is already on. It is kept as protection in case a future build changes that default.
+- **`migrate()` opens its own connections without `openDatabase()`.** Once the file is in WAL mode, migrations would therefore run at `synchronous = NORMAL`, which does not match decision 0007. To handle in the next step (`initDatabase`).
+- **Foreign keys are also on inside `migrate()`'s connections.** A future migration that rebuilds a table may need them off, outside the migration transaction (design note section 2).
+- **The design note says foreign keys are "off by default" and is silent on the WAL `synchronous` default.** Both are wrong for this build and need a dated correction.
+
+**Still unverified:** mutation-checking of the 6 tests; behaviour on macOS.
+
+---
+
 ## 4. Not started, unverified, or blocked
 
 **The Serato spike (Phase 2S) — updated 2026-10-13.** Run on 2026-10-07 and 2026-10-12/13 on Serato DJ Lite 4.0.10.213, Windows 11, demo tracks only; full evidence in `docs/serato-spike.md`. All four checks now have answers on that platform:
@@ -286,4 +339,4 @@ Nothing has been verified on a Mac, and no part of the UI port has been done —
 
 *Updated 2026-10-13:* the Serato spike has been run on Windows / Serato DJ Lite; all four checks have answers on that platform (Section 4), pending Mike's version and a Mac.
 
-Next: the SQLite foundation. The expected ABI obstacle did not materialise — `better-sqlite3` 13.0.3 loads in Electron 44 as installed (Section 5) — so the next step was the schema, `schema_version` and migrations (§6.2). That runner and its verified backup now exist and are tested (Section 3a). Next is wiring it into startup with the real database location and connection settings, then the first preference tables and `prefs.get/set` IPC.
+Next: the SQLite foundation. The expected ABI obstacle did not materialise — `better-sqlite3` 13.0.3 loads in Electron 44 as installed (Section 5) — so the next step was the schema, `schema_version` and migrations (§6.2). That runner and its verified backup now exist and are tested (Section 3a). Next is wiring it into startup with the real database location and connection settings, then the first preference tables and `prefs.get/set` IPC. The startup plan is written and documentation-checked (decision 0007, design note), and its first step, the connection settings, is done (Section 3b). Next: `initDatabase(dir)` with the WAL tests, including running `migrate()` at `synchronous = FULL`.
