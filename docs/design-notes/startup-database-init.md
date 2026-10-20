@@ -1,7 +1,9 @@
 # Design note: opening the real database at app startup
 
 **Date:** 2026-10-13 · **Phase:** 5 (SQLite milestone) · **Status:** Plan, checked against official documentation (section 7). Nothing in this note is implemented yet.
+**Status update 2026-10-19:** section 2's connection settings are implemented in `src/main/db/connection.ts`, with the `timeout` option added to `better-sqlite3.d.ts` (commit `98b64e4`; marked "done" in section 6). The rest is still a plan.
 **Decisions taken from this plan:** `docs/decisions/0007-startup-database-initialization.md`. Builds on `0006-database-wide-schema-version.md`, which awaits Ranjish's review.
+**Correction 2026-10-19:** see section 8. Sections 2 and 7 contained two wrong statements about this build's SQLite defaults; the original text is kept and marked.
 
 The migration runner and verified pre-migration backup already exist and are tested in isolation (`apps/desktop/src/main/db/`, commit `2772825`). This step connects them to app startup: on launch the app opens or creates its real database, brings it up to date safely, and keeps one connection open while it runs. If anything goes wrong, it explains and quits instead of continuing with a broken database.
 
@@ -34,8 +36,8 @@ Set when the long-lived connection opens, in a new `src/main/db/connection.ts`, 
 | Setting | Value | How it is set | Why |
 |---|---|---|---|
 | `journal_mode` | `WAL` | `PRAGMA` on open | Safer after a crash; reads don't block writes. Persistent once set, and cannot be changed while a transaction is active, so it stays out of migrations |
-| `synchronous` | `FULL` | `PRAGMA` on every open | In WAL mode FULL is fully durable: a crash or power loss does not lose committed transactions (NORMAL can). Speed is irrelevant for prefs; revisit when library import is benchmarked. Treated as per-connection and set on every open (the documentation excerpt read does not state its scope) |
-| `foreign_keys` | `ON` | `PRAGMA` on every open | Off by default; a no-op inside a transaction, so it is set right after opening |
+| `synchronous` | `FULL` | `PRAGMA` on every open | In WAL mode FULL is fully durable: a crash or power loss does not lose committed transactions (NORMAL can). Speed is irrelevant for prefs; revisit when library import is benchmarked. Treated as per-connection and set on every open (the documentation excerpt read does not state its scope). *(Correction 2026-10-19, section 8: in this build WAL defaults to NORMAL, so this setting is essential, and `migrate()`'s writing connection needs it too)* |
+| `foreign_keys` | `ON` | `PRAGMA` on every open | Off by default; a no-op inside a transaction, so it is set right after opening. *(Correction 2026-10-19, section 8: ON by default in this build)* |
 | busy timeout | 5000 ms | better-sqlite3 constructor option `timeout: 5000` | Already better-sqlite3's default; passed explicitly for clarity. No separate PRAGMA |
 
 **Future note (not this step):** because `foreign_keys` cannot change inside a transaction, a later migration that needs foreign keys off (for example, rebuilding a table) must handle that outside the one-transaction migration run.
@@ -82,11 +84,11 @@ In `src/main/index.ts`, in this order:
 
 | File | Change |
 |---|---|
-| `src/main/db/connection.ts` | New: `openDatabase(path)` with the settings in section 2 |
+| `src/main/db/connection.ts` | New: `openDatabase(path)` with the settings in section 2. **(Done, `98b64e4`.)** |
 | `src/main/db/init.ts` | New: `initDatabase(dir)` creates the folder, runs `migrate()`, opens the connection, returns a result. No Electron imports |
 | `src/main/index.ts` | Single-instance lock, pinned user-data path with development override, init before window, `showErrorBox` and quit on failure, close on quit, new log line |
 | `src/main/db/sqlite.ts` | Removed |
-| `src/main/db/better-sqlite3.d.ts` | Add the `timeout` constructor option; extend further if needed |
+| `src/main/db/better-sqlite3.d.ts` | Add the `timeout` constructor option; extend further if needed. **(`timeout` done, `98b64e4`; further extension still planned.)** |
 | `test/db-init.test.mjs` | New tests, listed below |
 | `test/security.test.js` | New check: preload and renderer source never mention `better-sqlite3` |
 | `docs/phase-reports/phase-5.md` | Results |
@@ -113,11 +115,11 @@ No new packages. Verification: `npm test`, `npm run typecheck`, `npm run build`,
 | `--user-data-dir` | Not documented on Electron's `app` or command-line-switch pages | Not relied on; replaced by `CCDJ_USER_DATA_DIR` (development builds only) |
 | `PRAGMA journal_mode` | WAL is persistent across connections; cannot be changed while a transaction is active | Set on open, outside migrations |
 | `PRAGMA synchronous` | FULL is durable (ACID) in WAL mode; NORMAL in WAL may lose the last transactions on power loss | Confirms decision 0007 item 5 |
-| `PRAGMA foreign_keys` | Default OFF; a no-op inside a transaction | Set right after opening; future-migration note in section 2 |
+| `PRAGMA foreign_keys` | Default OFF; a no-op inside a transaction. *(Correction 2026-10-19, section 8: true of plain SQLite, but this build defaults to ON)* | Set right after opening; future-migration note in section 2 |
 | busy timeout | better-sqlite3 option `timeout` defaults to 5000 ms | Use the constructor option, not a PRAGMA |
 | Read-only WAL databases | Supported since SQLite 3.22.0 (we have 3.53.4) if `-shm`/`-wal` exist or the folder is writable so they can be created. The last connection to close checkpoints and deletes them. A WAL database must never be separated from its `-wal` file | `migrate()`'s read-only open works in our writable folder. Using the backup API rather than a file copy is confirmed. Side-file caveat added to the tests |
 
-No finding contradicts decision 0007, so no superseding record is needed.
+No finding contradicts decision 0007, so no superseding record is needed. *(Still true after the 2026-10-19 correction; see section 8.)*
 
 **Still to confirm by running the app** (against temporary folders):
 - Chromium's files follow the pinned `userData`;
@@ -131,3 +133,27 @@ No finding contradicts decision 0007, so no superseding record is needed.
 - SQLite PRAGMA reference (https://www.sqlite.org/pragma.html);
 - SQLite WAL (https://www.sqlite.org/wal.html);
 - better-sqlite3 API (`docs/api.md` in WiseLibs/better-sqlite3).
+
+## 8. Correction (2026-10-19): this build's SQLite defaults
+
+Sections 2 and 7 describe **plain SQLite's** defaults, as stated in the SQLite PRAGMA reference. The SQLite bundled inside better-sqlite3 is compiled with different defaults, so two of those statements are wrong for this app.
+
+**Finding.**
+- better-sqlite3's `docs/compilation.md` lists the compile options of its bundled SQLite, including `SQLITE_DEFAULT_FOREIGN_KEYS=1` and `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`. The same options appear in the installed package's build configuration, `apps/desktop/node_modules/better-sqlite3/deps/defines.gypi`.
+- So, in every connection this app opens, with or without `openDatabase()`:
+  - **foreign keys are ON by default** (section 2 and section 7 said off);
+  - **in WAL mode, `synchronous` defaults to NORMAL (1)** (section 2 did not mention a WAL-specific default). NORMAL in WAL mode can lose the most recently committed transactions on power loss (section 7, SQLite PRAGMA reference).
+- Confirmed at runtime by test 5 in `test/db-connection.test.mjs` (commit `98b64e4`): a plain connection to a WAL database reports `synchronous` 1, and reopening it through `openDatabase()` reports 2 (FULL). Its first version, which assumed foreign keys off, failed on this. See the Phase 5 report, Section 3b.
+
+**Consequence 1: `openDatabase()`'s settings.** Its `synchronous = FULL` is essential, not redundant: without it the long-lived connection would run at NORMAL. Its `foreign_keys = ON` currently has no visible effect, since the default is already on, and is kept as protection in case a future build changes that default.
+
+**Consequence 2: `migrate()`'s writing connection also needs `synchronous = FULL`.**
+- `migrate()` (`src/main/db/migrate.ts`) opens its own connections with `new Database(...)`, not through `openDatabase()`. It opens one read-only connection to read the version and make the backup, and one writing connection to apply migrations.
+- `journal_mode = WAL` is stored in the database file, so once `openDatabase()` has opened a database once, every later connection to it is in WAL mode, including `migrate()`'s. Because `synchronous` is not stored in the file, `migrate()`'s writing connection then runs at this build's WAL default, NORMAL.
+- A migration commit is exactly the write that most needs durability: it changes the schema version the next launch reads. Losing it on power loss would leave the database at the old version, although the app had already reported success and possibly continued.
+- Decision 0007 item 5 chose `synchronous = FULL` for the app's database. This correction reads that as covering **every connection that writes**, which includes `migrate()`'s. It does not change the decision. How `migrate()` gets FULL (for example, a shared open helper) will be proposed in the `initDatabase` step before `migrate.ts` is changed; it is not changed here.
+- The read-only connection is unaffected, because it never commits.
+
+**Consequence 3: foreign keys inside migrations.** Foreign keys are already on inside `migrate()`'s connections. The future-migration note in section 2 therefore applies from the start: a migration that rebuilds a table and needs foreign keys off must switch them off outside the one-transaction migration run, because the setting is a no-op inside a transaction.
+
+**Effect on decision 0007:** none. Item 5 ("`synchronous = FULL` … together with WAL mode, foreign keys on and a busy timeout") stands as written; this correction clarifies which connections it covers and does not supersede it.

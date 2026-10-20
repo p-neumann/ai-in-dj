@@ -7,6 +7,7 @@
 - **2026-10-13 (second update):** `better-sqlite3` installed and verified to load in Electron 44 without a rebuild (Section 5); `package.json`/`package-lock.json` changed. A minimal main-process load check was then added (`src/main/db/`, one call and a temporary startup log in `src/main/index.ts`) and verified through `npm run build` and a launch of the built app (Section 5).
 - **2026-10-13 (third update):** migration runner and pre-migration backup added with 11 tests (Section 3a); decision 0006 recorded (Section 6).
 - **2026-10-13 (fourth update):** startup plan and decision 0007 committed (`f79ef3a`); connection settings (`openDatabase()`) added with 6 tests, revealing that this better-sqlite3 build's SQLite defaults differ from plain SQLite's (Section 3b).
+- **2026-10-19 (fifth update):** design note corrected for this build's SQLite defaults (Section 3b); Section 3a's note on connection pragmas updated. Documentation only; no code changed.
 **Branch:** `hannah/phase5-desktop` (based on `ranjish/ccdj-desktop`, pushed)
 **AI calls used while doing this work:** none. Nothing in this milestone calls a model, and `apps/desktop` has no provider dependency of any kind.
 
@@ -150,7 +151,7 @@ The app's userData folder (`%APPDATA%\ccdj-desktop`) contains no CCDJ database. 
 - Not wired to startup, and no real database location or name is fixed yet. `ccdj-db.sqlite` is used in tests only.
 - `tooNew` returns a status only. Offering to restore a compatible snapshot or quitting with instructions (§6.2) needs UI and is not built.
 - Corrupt-database recovery (§6.2) is not implemented. A file that is not a database currently makes `migrate` throw.
-- Tests use SQLite's default rollback journal, not WAL. Backup and read-only opening in WAL mode are not exercised yet. Connection pragmas (journal mode, foreign keys) come with the startup wiring.
+- Tests use SQLite's default rollback journal, not WAL. Backup and read-only opening in WAL mode are not exercised yet. Connection pragmas (journal mode, foreign keys) come with the startup wiring. *(2026-10-19: the connection settings, including `synchronous = FULL`, now exist in `openDatabase()` (Section 3b) but are not wired to startup; `migrate()`'s own connections do not use them yet.)*
 - No backup retention policy. Backups of each old version accumulate.
 - Not tested on a large database, on a Mac, or with two app instances opening the file at once.
 - The tests were not mutation-checked, i.e. not seen to fail against deliberately broken code. All 11 passed on the first run.
@@ -187,23 +188,23 @@ Tests:
 2. `synchronous` is FULL (2);
 3. the busy timeout is 5000 ms;
 4. foreign keys are on and enforced (an insert with a missing parent is rejected);
-5. WAL persists after closing, while a plain connection falls back to `synchronous = NORMAL`; reopening through `openDatabase()` restores FULL;
+5. WAL persists after closing, while a plain connection falls back to `synchronous = NORMAL` and has foreign keys on; reopening through `openDatabase()` restores FULL;
 6. a file that is not a database is rejected, left byte-for-byte unchanged, and not left open.
 
 0 temporary folders were left over.
 
 **Finding: this better-sqlite3 build changes SQLite's defaults.**
 - The first run of test 5 failed (23/24). It assumed a plain connection has foreign keys **off**, which is SQLite's documented default, but the connection reported **on**.
-- better-sqlite3's `docs/compilation.md` lists the bundled SQLite's compile options, including `SQLITE_DEFAULT_FOREIGN_KEYS=1` and `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`. So, in every connection this app opens:
+- better-sqlite3's `docs/compilation.md` lists the bundled SQLite's compile options, including `SQLITE_DEFAULT_FOREIGN_KEYS=1` and `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1` (also visible in the installed package's `deps/defines.gypi`, checked 2026-10-19). So, in every connection this app opens:
   - **foreign keys are on by default**;
   - **in WAL mode, `synchronous` defaults to NORMAL**, which can lose the last committed transactions on power loss. FULL is what decision 0007 chose.
 - Test 5 was rewritten to assert the actual behaviour (24/24). `connection.ts` was not changed; it was already correct.
 
-**Consequences (not yet acted on):**
+**Consequences:**
 - **`openDatabase()`'s explicit `synchronous = FULL` is essential, not redundant.** Its `foreign_keys = ON` line cannot be shown to have an effect, because the default is already on. It is kept as protection in case a future build changes that default.
-- **`migrate()` opens its own connections without `openDatabase()`.** Once the file is in WAL mode, migrations would therefore run at `synchronous = NORMAL`, which does not match decision 0007. To handle in the next step (`initDatabase`).
+- **`migrate()` opens its own connections without `openDatabase()`.** Once the file is in WAL mode (stored in the file), migrations would therefore run at this build's WAL default, `synchronous = NORMAL` (`synchronous` is not stored in the file). That does not meet decision 0007 item 5, read as covering every connection that writes (design note section 8). Not yet fixed; to handle in the `initDatabase` step.
 - **Foreign keys are also on inside `migrate()`'s connections.** A future migration that rebuilds a table may need them off, outside the migration transaction (design note section 2).
-- **The design note says foreign keys are "off by default" and is silent on the WAL `synchronous` default.** Both are wrong for this build and need a dated correction.
+- **Design note corrected 2026-10-19.** It said foreign keys are "off by default" and was silent on the WAL `synchronous` default. Both are wrong for this build. A dated correction is now in section 8; the original text is kept and marked. Decision 0007 is unchanged.
 
 **Still unverified:** mutation-checking of the 6 tests; behaviour on macOS.
 
