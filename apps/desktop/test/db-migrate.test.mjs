@@ -16,6 +16,7 @@ import { migrate, assertValidMigrations } from "../src/main/db/migrate.ts";
 import { MIGRATIONS } from "../src/main/db/migrations.ts";
 import { backupPathFor, createVerifiedBackup, verifyBackup } from "../src/main/db/backup.ts";
 import { readSchemaVersion, tableRowCounts } from "../src/main/db/schema.ts";
+import { openDatabase } from "../src/main/db/connection.ts";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -110,6 +111,34 @@ test("an upgrade makes a verified backup of the old version first", async (t) =>
   );
   assert.ok(!tablesOf(expectedBackup).includes("notes"));
   assert.ok(!readdirSync(dir).some((f) => f.endsWith(".tmp")), "temporary backup left behind");
+});
+
+test("migrations on a WAL database run at synchronous = FULL", async (t) => {
+  const dbPath = join(tempDir(t), "ccdj-db.sqlite");
+  await migrate(dbPath); // v1
+  openDatabase(dbPath).close(); // journal mode is stored in the file: now WAL
+
+  // A test-only migration that records the writing connection's settings.
+  // Reading them inside the migration transaction is allowed; changing them
+  // is not (design note section 8).
+  let seen;
+  const probe = {
+    version: 2,
+    name: "test: record connection settings",
+    up(db) {
+      seen = {
+        journalMode: db.pragma("journal_mode", { simple: true }),
+        synchronous: db.pragma("synchronous", { simple: true }),
+        foreignKeys: db.pragma("foreign_keys", { simple: true })
+      };
+    }
+  };
+
+  const result = await migrate(dbPath, [...MIGRATIONS, probe]);
+
+  assert.equal(result.status, "migrated");
+  // Without explicit settings this build would run WAL at NORMAL (1).
+  assert.deepEqual(seen, { journalMode: "wal", synchronous: 2, foreignKeys: 1 });
 });
 
 test("a database newer than this build is refused and not written", async (t) => {

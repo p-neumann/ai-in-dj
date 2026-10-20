@@ -11,6 +11,7 @@
 import Database from "better-sqlite3";
 import { existsSync, rmSync } from "node:fs";
 import { createVerifiedBackup } from "./backup.ts";
+import { applyConnectionSettings, BUSY_TIMEOUT_MS } from "./connection.ts";
 import { MIGRATIONS, type Migration } from "./migrations.ts";
 import { readSchemaVersion, userTableNames, VERSION_TABLE } from "./schema.ts";
 
@@ -74,9 +75,14 @@ export async function migrate(
   }
 
   const pending = migrations.filter((m) => m.version > current);
-  const db = new Database(dbPath);
+  const db = new Database(dbPath, { timeout: BUSY_TIMEOUT_MS });
   let applying = 0;
   try {
+    // synchronous=FULL and foreign keys, before the transaction starts
+    // (SQLite refuses to change synchronous inside one). Journal mode is left
+    // to openDatabase(). If this throws, the result is migrationFailed with
+    // failedAt 0: nothing was applied.
+    applyConnectionSettings(db);
     db.transaction(() => {
       const record = () =>
         db.prepare(`INSERT INTO ${VERSION_TABLE} (version, name, applied_at) VALUES (?, ?, ?)`);

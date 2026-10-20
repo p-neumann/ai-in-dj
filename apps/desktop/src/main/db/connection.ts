@@ -10,6 +10,17 @@ import Database from "better-sqlite3";
 // better-sqlite3's own default; passed explicitly so the choice is visible.
 export const BUSY_TIMEOUT_MS = 5000;
 
+// Per-connection settings every writing connection needs, including
+// migrate()'s. SQLite does not store these in the file, and this
+// better-sqlite3 build defaults WAL connections to synchronous=NORMAL
+// (design note section 8), so they are applied on every open. Call before
+// any transaction: SQLite refuses to change synchronous inside one, and
+// foreign_keys is a no-op there.
+export function applyConnectionSettings(db: Database): void {
+  db.pragma("synchronous = FULL");
+  db.pragma("foreign_keys = ON");
+}
+
 // Opens (or creates) the database at `path` with WAL, synchronous=FULL and
 // foreign keys on. Throws if any setting cannot be applied; the connection is
 // closed first, so nothing is left holding the file.
@@ -20,8 +31,7 @@ export function openDatabase(path: string): Database {
     if (mode !== "wal") {
       throw new Error(`could not enable WAL journal mode (SQLite reported ${String(mode)})`);
     }
-    db.pragma("synchronous = FULL");
-    db.pragma("foreign_keys = ON");
+    applyConnectionSettings(db);
   } catch (err) {
     db.close();
     throw err;

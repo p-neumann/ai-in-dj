@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { BUSY_TIMEOUT_MS, openDatabase } from "../src/main/db/connection.ts";
+import { applyConnectionSettings, BUSY_TIMEOUT_MS, openDatabase } from "../src/main/db/connection.ts";
 
 function tempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), "ccdj-connection-test-"));
@@ -90,6 +90,22 @@ test("WAL persists after closing, but synchronous=FULL must be set on every open
     assert.equal(db.pragma("synchronous", { simple: true }), 2);
     assert.equal(db.pragma("foreign_keys", { simple: true }), 1);
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
+  });
+});
+
+test("connection settings cannot be applied inside a transaction", (t) => {
+  // Guards the rule in design note section 8: SQLite refuses to change
+  // synchronous inside a transaction, so applyConnectionSettings must run
+  // before one (never from inside a migration).
+  const dbPath = join(tempDir(t), "ccdj-db.sqlite");
+  withOpen(dbPath, (db) => {
+    assert.throws(
+      () => db.transaction(() => applyConnectionSettings(db))(),
+      /Safety level may not be changed inside a transaction/
+    );
+    // Outside a transaction it works, and the setting is still FULL.
+    applyConnectionSettings(db);
+    assert.equal(db.pragma("synchronous", { simple: true }), 2);
   });
 });
 
