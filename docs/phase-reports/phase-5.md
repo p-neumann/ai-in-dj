@@ -167,7 +167,7 @@ Ranjish asked these before any code was written, not after - both measured direc
 
 ---
 
-## Step 5, piece 3 — Track Cheat core (commit pending)
+## Step 5, piece 3 — Track Cheat core (commit `d2bef3e`)
 
 ### Confirmed before building anything (Ranjish's own check)
 The recommendation logic is already built and tested in the backend - that was Phase 3/4's job, not this one. This piece adds only the screen (seed, sliders, button) and wires it to the already-existing `POST /v1/track-cheat/recommend` route; it changes nothing in `apps/server`. Follows `CLAUDE.md`'s own Phase 5 line: *"replace every `window.storage` use and every direct Anthropic `fetch` with the typed API client."* No session yet - chain/bridge/drift/daisy-chain memory is piece 4, kept deliberately separate (the real route runs fully stateless without a `sessionId`, which is its own documented behavior, not a shortcut taken here).
@@ -214,11 +214,12 @@ The library doesn't need to travel on every recommend call - it only changes whe
 - Security gate re-checked on the real compiled output: still 0 hits for `window.storage`/`api.anthropic.com`, and 0 hits for the dev token or the backend URL anywhere in the compiled renderer bundle - confirming the sync/resync logic, like everything else, stayed entirely on the main-process side.
 - All server and desktop test runs done with `--test-concurrency=1` (now the permanent default in both `package.json` files, per Ranjish's standing instruction after a parallel test run exhausted his laptop's memory mid-session and crashed it).
 
-### Real-window check - waiting on Ranjish before this gets committed
-1. Start the real backend: `cd apps/server`, `npm start` (confirm it logs `provider: mock`).
-2. In another terminal: `cd apps/desktop`, `npm run dev`.
-3. In the "Step 5, piece 3: Track Cheat" section, search for a seed song and pick one from the dropdown.
-4. Move the vibe slider - confirm the label text changes (e.g. slide to -8 and see "Vibe Lock"; slide to 0 and see no label at all, same as the original app).
-5. Click "Get Recommendations" with your real, full library loaded - this is the actual regression test for the 413. Expect a short pause (the library syncs once, then the recommend call runs), then a real results list, no 413.
-6. Click "Get Recommendations" again - should be fast this time (no 413, no resync needed, since the revision is already cached).
-7. **To check the auto-resync specifically:** stop the backend server (Ctrl+C in its terminal) and start it again fresh (`npm start`) - this makes the server forget the library it had, same as a real restart mid-gig. Without restarting the desktop app, click "Get Recommendations" one more time. Expect it to still work with no visible error - the app should detect the server forgot, resync automatically, and get real results back in one click, not two.
+### Real-window check - confirmed by Ranjish, 2026-10-11
+
+Checklist run as planned, with one honest difference from how it was written: by this point `LIVE_AI_CALLS=true` in `apps/server/.env`, so the backend was calling the real Anthropic API, not the mock provider the checklist's step 1 assumed. That's a stronger result, not a weaker one - this is the real regression test for the 413, actually exercised against the real AI, not simulated.
+
+**Result:** searched for a seed, moved the vibe slider (label text changed correctly), clicked "Get Recommendations" against the real, full library. Got back **10 of 20 requested**, `candidatePoolSize: 100`, `fallbackDepth: 0` - a clean first-try result, no fallback chain needed. Marked `simulated: false` (real AI). The 10 returned songs fit the seed musically. No 413, confirming the library-sync fix works end to end against the real backend and the real AI.
+
+Step 5, piece 3 is fully confirmed working, for real, with real AI - not just simulated.
+
+(The second-click-is-fast and stop-server/auto-resync checks from the original plan were not separately reported back - only the core recommend-against-real-AI result above is confirmed with evidence. Treat those two as still open if they matter later.)
