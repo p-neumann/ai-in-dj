@@ -66,7 +66,7 @@ export class ValidationError extends Error {}
 // sent.
 export class LibraryOutOfSyncError extends Error {}
 
-function buildRequestBody(seedName, ctx, system, allEx, likedNames) {
+function buildRequestBody(seedName, ctx, system, allEx, likedNames, debugOverride) {
   const seedTitleWords = seedName.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
     .trim().split(" ").filter((w) => w.length > 2).slice(0, 3);
   const seedExcludeNote = seedTitleWords.length
@@ -79,8 +79,14 @@ function buildRequestBody(seedName, ctx, system, allEx, likedNames) {
   // entirely until caught while wiring the liked-tracks line below.
   const exN = allEx && allEx.length ? "\nDo NOT include:\n" + allEx.join("\n") : "";
   const likedN = likedNames && likedNames.length ? "\nDJ liked these:\n" + likedNames.join("\n") : "";
-  return {
-    model: "claude-sonnet-5",
+  // debugOverride (docs/decisions/0010): test-only model/effort override
+  // for the blind A/B/C comparison Ranjish is running against the real
+  // 2-minute-latency report. Never set by the real desktop app's normal
+  // Track Cheat call - only by the manual test harness. Default stays
+  // exactly what shipped before: claude-sonnet-5, no explicit effort
+  // (Anthropic's own default is "high").
+  const body = {
+    model: (debugOverride && debugOverride.model) || "claude-sonnet-5",
     // Was 2000 (prototype-era), raised to 6000 on 2026-10-06 (docs/decisions/
     // 0006) after thinking exhausted a 2000 ceiling on a tiny test library.
     // 6000 then proved insufficient too: against a real ~100-track library
@@ -104,11 +110,23 @@ function buildRequestBody(seedName, ctx, system, allEx, likedNames) {
         "\nHARD RULES:\n1. Every result must be a DIFFERENT song title — never return two versions or remixes of the same song.\n2. Never return any version of the seed track.\n3. Return exactly 20 different song titles." + likedN
     }]
   };
+  if (debugOverride && debugOverride.effort) {
+    body.output_config = { effort: debugOverride.effort };
+  }
+  return body;
 }
 
-async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effectiveRange, allEx, playedNames, likedNames) {
-  const requestBody = buildRequestBody(seedName, ctx, system, allEx, likedNames);
+// docs/decisions/0010: real per-call timing and token usage, logged and
+// returned alongside the results - pure observability, changes nothing
+// about which songs get picked or how they're ranked. Built after a real
+// 2-minute single-call latency report (fallbackDepth 0) had no data to
+// diagnose from - this is what would have told us, immediately, whether
+// that was thinking tokens or something else.
+async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effectiveRange, allEx, playedNames, likedNames, debugOverride) {
+  const requestBody = buildRequestBody(seedName, ctx, system, allEx, likedNames, debugOverride);
+  const startedAt = Date.now();
   const response = await provider.call(requestBody);
+  const elapsedMs = Date.now() - startedAt;
   if (!response.content || !Array.isArray(response.content)) {
     throw new ProviderError((response.error && response.error.message) || "Provider returned no content", "PROVIDER_ERROR");
   }
@@ -118,7 +136,26 @@ async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effe
   } catch (parseErr) {
     throw new ProviderError("Model response was not valid JSON: " + parseErr.message, "MODEL_OUTPUT_INVALID");
   }
-  return resolveRes(rawResults, ctx.indexed, seedName, ctx.seedGenre, vibeForSort > 0, effectiveRange, allEx, playedNames);
+  const resolved = resolveRes(rawResults, ctx.indexed, seedName, ctx.seedGenre, vibeForSort > 0, effectiveRange, allEx, playedNames);
+
+  const usage = response.usage || {};
+  const callDiag = {
+    model: requestBody.model,
+    effort: (requestBody.output_config && requestBody.output_config.effort) || "default",
+    elapsedMs,
+    inputTokens: usage.input_tokens || 0,
+    outputTokens: usage.output_tokens || 0,
+    thinkingTokens: (usage.output_tokens_details && usage.output_tokens_details.thinking_tokens) || 0,
+    simulated: provider.kind !== "anthropic"
+  };
+  console.log(
+    "[track-cheat] AI call: model=" + callDiag.model + " effort=" + callDiag.effort +
+    " elapsedMs=" + callDiag.elapsedMs + " inputTokens=" + callDiag.inputTokens +
+    " outputTokens=" + callDiag.outputTokens + " thinkingTokens=" + callDiag.thinkingTokens +
+    (callDiag.simulated ? " (simulated)" : " (real)")
+  );
+
+  return { resolved, callDiag };
 }
 
 function makeBatchId() {
@@ -129,7 +166,11 @@ export async function recommendTrackCheat(request, provider) {
   const {
     library: inlineLibrary, libraryRevision = null, seedTrackId, vibe = -3, energy = 0, exclude = [],
     playCountMode = "mix", styleProfile: requestStyleProfile = null, styleProfileEnrichment: requestStyleProfileEnrichment = null,
-    vibePromptText = "", sessionId = null, clientSeq = null, expectedStateVersion = null
+    vibePromptText = "", sessionId = null, clientSeq = null, expectedStateVersion = null,
+    // debugOverride (docs/decisions/0010): test-only, for Ranjish's blind
+    // Sonnet-5-vs-lower-effort-vs-Haiku comparison. Never sent by the real
+    // desktop app's normal Track Cheat path.
+    debugOverride = null
   } = request;
 
   // Two ways a caller can supply the library: inline (small test
@@ -302,11 +343,14 @@ export async function recommendTrackCheat(request, provider) {
   let fallbackDepth = 0;
   let cached = false;
   let candidatePoolSize = 0;
+  const aiCalls = [];
 
   try {
     const ctx1 = buildCtxFor(true, false, vibe > 0);
     candidatePoolSize = ctx1.indexed.length;
-    resolved = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, playedNames, likedNames);
+    const call1 = await callAndResolve(provider, seedName, ctx1, sys(currentVibe, false, null), currentVibe, effectiveRange, allEx, playedNames, likedNames, debugOverride);
+    aiCalls.push(call1.callDiag);
+    resolved = call1.resolved;
     resolved = applyGenreWall(resolved, seedGenre, currentVibe);
     resolved = applyGenderFilter(resolved, seedGender, currentVibe);
     resolved = injectGenreDiversity(resolved, ctx1.indexed, seedGenre, currentVibe, effectiveRange, allEx, seedName);
@@ -320,7 +364,9 @@ export async function recommendTrackCheat(request, provider) {
       fallbackDepth = 1;
       try {
         const ctx2 = buildCtxFor(true, true, undefined);
-        let resolved2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, playedNames, likedNames);
+        const call2 = await callAndResolve(provider, seedName, ctx2, sys(currentVibe, true, null), currentVibe, effectiveRange, allEx, playedNames, likedNames, debugOverride);
+        aiCalls.push(call2.callDiag);
+        let resolved2 = call2.resolved;
         resolved2 = applyGenreWall(resolved2, seedGenre, currentVibe);
         resolved2 = applyGenderFilter(resolved2, seedGender, currentVibe);
         resolved2 = applyTypeLock(resolved2, trackTypeLock);
@@ -333,7 +379,9 @@ export async function recommendTrackCheat(request, provider) {
           const looserVibe = Math.min(currentVibe + 2, 0);
           try {
             const ctx3 = buildCtxFor(true, true, undefined);
-            let resolved3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, playedNames, likedNames);
+            const call3 = await callAndResolve(provider, seedName, ctx3, sys(looserVibe, false, null), looserVibe, effectiveRange, allEx, playedNames, likedNames, debugOverride);
+            aiCalls.push(call3.callDiag);
+            let resolved3 = call3.resolved;
             resolved3 = applyGenreWall(resolved3, seedGenre, looserVibe);
             resolved3 = applyGenderFilter(resolved3, seedGender, looserVibe);
             resolved3 = applyTypeLock(resolved3, trackTypeLock);
@@ -406,6 +454,13 @@ export async function recommendTrackCheat(request, provider) {
     }
   }
 
+  // timingsMs.ai + aiCalls (docs/decisions/0010): CLAUDE.md 6.4 already
+  // names a single timingsMs.ai number - aiCalls is purely additive, the
+  // per-call breakdown (model/effort/latency/token usage) that number
+  // alone can't show, built to diagnose the real reported 2-minute
+  // single-call latency instead of guessing at its cause.
+  const timingsMs = { ai: aiCalls.reduce((sum, c) => sum + c.elapsedMs, 0) };
+
   return {
     results,
     candidatePoolSize,
@@ -418,6 +473,8 @@ export async function recommendTrackCheat(request, provider) {
     chain: session ? { chainId: session.chainId, depth: session.daisyChainDepth } : null,
     superseded,
     stateVersion: session ? session.stateVersion : null,
-    simulated: provider.kind !== "anthropic"
+    simulated: provider.kind !== "anthropic",
+    timingsMs,
+    aiCalls
   };
 }
