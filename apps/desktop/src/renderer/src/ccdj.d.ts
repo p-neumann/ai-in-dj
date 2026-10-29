@@ -66,6 +66,19 @@ interface CcdjTrackCheatResult {
   fallbackDepth?: number;
   simulated?: boolean;
   error?: string;
+  chain?: { chainId: string; depth: number } | null;
+  trigger?: string | null;
+  mode?: string;
+  stateVersion?: number | null;
+  superseded?: boolean;
+}
+
+interface CcdjSessionEventResult {
+  ok: boolean;
+  accepted?: boolean;
+  stateVersion?: number;
+  duplicate?: boolean;
+  error?: string;
 }
 
 interface Window {
@@ -88,11 +101,15 @@ interface Window {
     backend: {
       checkHealth: () => Promise<CcdjBackendHealthResult>;
       createSession: () => Promise<CcdjBackendSessionResult>;
+      sendSessionEvent: (sessionId: string, event: Record<string, unknown>) => Promise<CcdjSessionEventResult>;
       recommendTrackCheat: (params: {
         seedTrackId: number;
         vibe: number;
         energy: number;
         playCountMode: string;
+        sessionId?: string;
+        clientSeq?: number;
+        expectedStateVersion?: number;
       }) => Promise<CcdjTrackCheatResult>;
     };
   };

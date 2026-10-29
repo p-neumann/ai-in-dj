@@ -1,4 +1,4 @@
-// Phase 5, step 5 piece 3 - Track Cheat core.
+// Phase 5, step 5 piece 3 (core) + piece 4 (daisy-chain/votes).
 //
 // All the actual recommendation logic (candidate selection, prompts,
 // ranking, the R28 fallback chain) already lives in the backend server,
@@ -7,13 +7,17 @@
 // already-built, already-tested recommend endpoint - nothing here
 // re-implements or changes any of that logic.
 //
-// No session yet on purpose (CLAUDE.md: the real route runs fully
-// stateless without one) - chain/bridge/drift/daisy-chain memory is
-// piece 4, kept deliberately separate.
+// Piece 4 adds the session the route already knows how to use: a
+// session is created once, and every seed change or vote is sent as one
+// event (CLAUDE.md 6.4) before the next recommend call. Chain depth,
+// bridge/drift detection, and thumbs-down exclusions are all DERIVED
+// server-side from that event history (Phase 4, sessionEvents.js) - this
+// screen only sends the right event at the right moment and shows what
+// the server decided.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { filterTracks } from "../library/filterTracks";
-import { recommendTrackCheat } from "../api/backendClient";
+import { recommendTrackCheat, createBackendSession, sendSessionEvent } from "../api/backendClient";
 import { getVibeLabel } from "./vibeLabels";
 
 type ResultState =
@@ -21,6 +25,14 @@ type ResultState =
   | { status: "loading" }
   | { status: "done"; data: CcdjTrackCheatResult }
   | { status: "error"; message: string };
+
+interface SessionState {
+  sessionId: string;
+  clientSeq: number;
+  stateVersion: number;
+  chainId: string | null;
+  chainDepth: number;
+}
 
 export default function TrackCheatScreen(): React.JSX.Element {
   const [allTracks, setAllTracks] = useState<CcdjLibraryRow[] | null>(null);
@@ -30,9 +42,42 @@ export default function TrackCheatScreen(): React.JSX.Element {
   const [energy, setEnergy] = useState(0);
   const [playCountMode, setPlayCountMode] = useState("mix");
   const [result, setResult] = useState<ResultState>({ status: "idle" });
+  const [votes, setVotes] = useState<Record<number, "up" | "down">>({});
+
+  // Source of truth for the session is a ref, not state: a single click
+  // can fire two sequential network calls (a seedDropped event, then
+  // recommend), and each must see the OTHER's result before it runs, not
+  // a stale value captured when the handler started. sessionDisplay is
+  // only for rendering.
+  const sessionRef = useRef<SessionState | null>(null);
+  const [sessionDisplay, setSessionDisplay] = useState<SessionState | null>(null);
+
+  function updateSession(patch: Partial<SessionState>): SessionState {
+    const next = { ...(sessionRef.current as SessionState), ...patch };
+    sessionRef.current = next;
+    setSessionDisplay(next);
+    return next;
+  }
 
   useEffect(() => {
     window.ccdj.library.getAllTracks().then(setAllTracks);
+    // One session per time this screen is open - matches the manual-test
+    // harness's own pattern. A real "new gig = new session" boundary is
+    // later UI work (Account/Settings, piece 7); this is enough to prove
+    // daisy-chain/votes actually reach the server's session state.
+    createBackendSession().then((created) => {
+      if (created.ok && created.sessionId) {
+        const initial: SessionState = {
+          sessionId: created.sessionId,
+          clientSeq: 0,
+          stateVersion: created.stateVersion ?? 0,
+          chainId: created.chainId ?? null,
+          chainDepth: 0
+        };
+        sessionRef.current = initial;
+        setSessionDisplay(initial);
+      }
+    });
   }, []);
 
   const seedMatches = useMemo(
@@ -41,28 +86,129 @@ export default function TrackCheatScreen(): React.JSX.Element {
   );
   const seedTrack = useMemo(() => allTracks?.find((t) => t.id === seedTrackId) ?? null, [allTracks, seedTrackId]);
   const vibeLabel = getVibeLabel(vibe);
+  // Computed once, outside the `result.status === "done"` narrowing below -
+  // inside that branch TS already knows result.status is "done", so
+  // re-comparing it to "loading" there is a type error, not just redundant.
+  const isBusy = result.status === "loading";
 
-  async function handleGetRecommendations(): Promise<void> {
-    if (seedTrackId === null) return;
+  function setSeedTo(trackId: number): void {
+    setSeedTrackId(trackId);
+    const match = allTracks?.find((t) => t.id === trackId);
+    setSeedSearch(match ? match.displayName : "");
+  }
+
+  // The one thing both a fresh manual pick (origin "external") and a
+  // daisy chain (origin "ccdjResult") have in common: tell the server
+  // what just happened, THEN ask for recommendations using the server's
+  // updated session state (CLAUDE.md 4.1 - these are genuinely different
+  // events, not the same action with a different label).
+  async function recommendForSeed(trackId: number, origin: "external" | "ccdjResult"): Promise<void> {
     setResult({ status: "loading" });
     try {
-      const data = await recommendTrackCheat({ seedTrackId, vibe, energy, playCountMode });
+      let session = sessionRef.current;
+      if (!session) {
+        const created = await createBackendSession();
+        if (!created.ok || !created.sessionId) {
+          setResult({ status: "error", message: created.error ?? "Could not create a session" });
+          return;
+        }
+        session = {
+          sessionId: created.sessionId,
+          clientSeq: 0,
+          stateVersion: created.stateVersion ?? 0,
+          chainId: created.chainId ?? null,
+          chainDepth: 0
+        };
+        sessionRef.current = session;
+        setSessionDisplay(session);
+      }
+
+      const seedSeq = session.clientSeq + 1;
+      const eventRes = await sendSessionEvent(session.sessionId, {
+        type: "seedDropped",
+        trackId,
+        origin,
+        clientSeq: seedSeq
+      });
+      if (!eventRes.ok) {
+        setResult({ status: "error", message: eventRes.error ?? "Could not record the seed change" });
+        return;
+      }
+      session = updateSession({ clientSeq: seedSeq, stateVersion: eventRes.stateVersion ?? session.stateVersion });
+
+      const recommendSeq = session.clientSeq + 1;
+      const data = await recommendTrackCheat({
+        seedTrackId: trackId,
+        vibe,
+        energy,
+        playCountMode,
+        sessionId: session.sessionId,
+        clientSeq: recommendSeq,
+        expectedStateVersion: session.stateVersion
+      });
       if (!data.ok) {
         setResult({ status: "error", message: data.error ?? "Unknown error" });
         return;
       }
+      updateSession({
+        clientSeq: recommendSeq,
+        stateVersion: data.stateVersion ?? session.stateVersion,
+        chainId: data.chain?.chainId ?? session.chainId,
+        chainDepth: data.chain?.depth ?? session.chainDepth
+      });
       setResult({ status: "done", data });
     } catch (error) {
       setResult({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
 
+  async function handleGetRecommendations(): Promise<void> {
+    if (seedTrackId === null) return;
+    await recommendForSeed(seedTrackId, "external");
+  }
+
+  async function handleDaisyChain(trackId: number): Promise<void> {
+    setSeedTo(trackId);
+    await recommendForSeed(trackId, "ccdjResult");
+  }
+
+  // Thumbs down reaches the server's REAL exclusion bookkeeping (R12):
+  // this track will not reappear in any future recommendation this
+  // session, on any path - not just hidden in this screen. Clicking the
+  // same vote again clears it (sends value: null, same as the source's
+  // own un-vote behavior).
+  async function handleVote(trackId: number, value: "up" | "down"): Promise<void> {
+    const session = sessionRef.current;
+    if (!session) return;
+    const nextValue = votes[trackId] === value ? null : value;
+    const seq = session.clientSeq + 1;
+    const res = await sendSessionEvent(session.sessionId, { type: "vote", trackId, value: nextValue, clientSeq: seq });
+    if (!res.ok) return;
+    updateSession({ clientSeq: seq, stateVersion: res.stateVersion ?? session.stateVersion });
+    setVotes((prev) => {
+      const next = { ...prev };
+      if (nextValue) next[trackId] = nextValue;
+      else delete next[trackId];
+      return next;
+    });
+  }
+
   return (
     <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 5, piece 3: Track Cheat</h2>
+      <h2 style={{ marginTop: 0 }}>Step 5, piece 3+4: Track Cheat</h2>
       <p style={{ fontSize: 13, color: "#666" }}>
-        All the recommendation logic (candidate selection, ranking, fallback chain) already lives in the real
-        backend (Phase 3/4) - this screen only sends your seed and sliders, and shows what comes back.
+        All the recommendation logic (candidate selection, ranking, fallback chain, chain/bridge/drift derivation,
+        thumbs-down exclusion) already lives in the real backend (Phase 3/4) - this screen sends your seed, sliders,
+        daisy-chain picks and votes, and shows what comes back.
+      </p>
+      <p style={{ fontSize: 12, color: "#888" }}>
+        Session: {sessionDisplay ? sessionDisplay.sessionId : "creating..."}
+        {sessionDisplay && (
+          <>
+            {" "}
+            &middot; chain {sessionDisplay.chainId ?? "none"} &middot; depth {sessionDisplay.chainDepth}
+          </>
+        )}
       </p>
 
       <div>
@@ -95,10 +241,7 @@ export default function TrackCheatScreen(): React.JSX.Element {
             <li
               key={t.id}
               style={{ cursor: "pointer", listStyle: "none" }}
-              onClick={() => {
-                setSeedTrackId(t.id);
-                setSeedSearch(t.displayName);
-              }}
+              onClick={() => setSeedTo(t.id)}
             >
               {t.displayName}
             </li>
@@ -149,10 +292,10 @@ export default function TrackCheatScreen(): React.JSX.Element {
 
       <button
         onClick={handleGetRecommendations}
-        disabled={seedTrackId === null || result.status === "loading"}
+        disabled={seedTrackId === null || isBusy}
         style={{ marginTop: "0.75rem" }}
       >
-        {result.status === "loading" ? "Getting recommendations... (can take 10-90s)" : "Get Recommendations"}
+        {isBusy ? "Getting recommendations... (can take 10-90s)" : "Get Recommendations"}
       </button>
 
       {result.status === "error" && <p style={{ color: "#c62828" }}>Error: {result.message}</p>}
@@ -161,14 +304,39 @@ export default function TrackCheatScreen(): React.JSX.Element {
           <p style={{ fontSize: 13, color: "#666" }}>
             {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
             {result.data.candidatePoolSize ?? 0} &middot; fallback depth {result.data.fallbackDepth ?? 0} &middot;{" "}
-            {result.data.simulated === false ? "REAL AI" : "simulated AI"}
+            {result.data.simulated === false ? "REAL AI" : "simulated AI"} &middot; trigger {result.data.trigger ?? "n/a"}{" "}
+            &middot; mode {result.data.mode ?? "none"} &middot; chain depth {result.data.chain?.depth ?? 0}
           </p>
           {(result.data.results ?? []).length === 0 && <p>No matches.</p>}
           <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>
             {(result.data.results ?? []).map((r) => (
-              <li key={r.trackId}>
+              <li key={r.trackId} style={{ marginBottom: "0.3rem" }}>
                 {r.name} - {r.bpm} bpm / {r.key}
                 {r.lane && <span style={{ marginLeft: 6, fontSize: 11, color: "#888" }}>[{r.lane}]</span>}
+                {r.camp && <span style={{ marginLeft: 6, fontSize: 11, color: "#888" }}>camp:{r.camp}</span>}
+                <button
+                  onClick={() => handleVote(r.trackId, "up")}
+                  disabled={isBusy}
+                  style={{
+                    marginLeft: 8,
+                    background: votes[r.trackId] === "up" ? "#c8e6c9" : undefined
+                  }}
+                >
+                  👍
+                </button>
+                <button
+                  onClick={() => handleVote(r.trackId, "down")}
+                  disabled={isBusy}
+                  style={{
+                    marginLeft: 4,
+                    background: votes[r.trackId] === "down" ? "#ffcdd2" : undefined
+                  }}
+                >
+                  👎
+                </button>
+                <button onClick={() => handleDaisyChain(r.trackId)} disabled={isBusy} style={{ marginLeft: 4 }}>
+                  Daisy-chain &rarr; use as new seed
+                </button>
               </li>
             ))}
           </ol>

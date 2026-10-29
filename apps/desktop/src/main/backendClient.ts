@@ -103,19 +103,66 @@ export async function syncLibraryToBackend(tracks: SyncLibraryTrack[]): Promise<
   }
 }
 
+// Piece 4 of step 5: daisy-chain and votes. Sends one session event
+// (CLAUDE.md 6.4: seedDropped / resultDragged / vote / sliderChanged /
+// tryAgain / sessionPrefs) through the server's own ordered event route.
+// All the state the event produces - chain depth, bridge/drift
+// detection, downvote exclusions - already lives and is already tested
+// server-side (Phase 4, sessionEvents.js); this only sends the event and
+// hands back what the server decided.
+export interface SessionEventResult {
+  ok: boolean;
+  accepted?: boolean;
+  stateVersion?: number;
+  duplicate?: boolean;
+  errorCode?: string;
+  error?: string;
+}
+
+export async function sendSessionEvent(
+  sessionId: string,
+  event: Record<string, unknown>
+): Promise<SessionEventResult> {
+  try {
+    const res = await fetch(`${backendUrl()}/v1/sessions/${sessionId}/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify(event)
+    });
+    const body = (await res.json()) as {
+      ok: boolean;
+      data?: { accepted: boolean; stateVersion: number; duplicate: boolean };
+      error?: { code?: string; message?: string };
+    };
+    if (!res.ok || !body.ok) {
+      return { ok: false, errorCode: body.error?.code, error: body.error?.message || `HTTP ${res.status}` };
+    }
+    return { ok: true, ...body.data };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 // Piece 3 of step 5: Track Cheat. Sends only a libraryRevision now, never
 // the library itself (that's the fix for the real 413 - see
-// docs/decisions/0009). No sessionId yet on purpose: the real route
-// treats that as optional and runs fully stateless without one (its own
-// documented behavior) - chain/bridge/drift/exclusion memory is piece 4,
-// not this one. Whether the call is real or simulated is decided
+// docs/decisions/0009). Whether the call is real or simulated is decided
 // entirely by apps/server's own LIVE_AI_CALLS - nothing here controls it.
+//
+// sessionId/clientSeq/expectedStateVersion (piece 4): optional, same
+// shape the manual-test harness already proves against the real route.
+// When sent, the recommend call is itself a session-changing request
+// (CLAUDE.md 6.3) - the server derives chain/bridge/drift state and
+// exclusions from the session's own event history, not from anything
+// this request supplies directly.
 export interface BackendTrackCheatRequest {
   libraryRevision: number;
   seedTrackId: number;
   vibe: number;
   energy: number;
   playCountMode: string;
+  sessionId?: string;
+  clientSeq?: number;
+  expectedStateVersion?: number;
 }
 
 export interface BackendTrackCheatResult {
@@ -128,6 +175,11 @@ export interface BackendTrackCheatResult {
   fallbackDepth?: number;
   simulated?: boolean;
   error?: string;
+  chain?: { chainId: string; depth: number } | null;
+  trigger?: string | null;
+  mode?: string;
+  stateVersion?: number | null;
+  superseded?: boolean;
 }
 
 export async function recommendTrackCheat(request: BackendTrackCheatRequest): Promise<BackendTrackCheatResult> {
@@ -163,7 +215,15 @@ export async function recommendTrackCheat(request: BackendTrackCheatRequest): Pr
 export async function recommendTrackCheatWithAutoSync(
   getTracks: () => SyncLibraryTrack[],
   cachedRevision: number | null,
-  params: { seedTrackId: number; vibe: number; energy: number; playCountMode: string }
+  params: {
+    seedTrackId: number;
+    vibe: number;
+    energy: number;
+    playCountMode: string;
+    sessionId?: string;
+    clientSeq?: number;
+    expectedStateVersion?: number;
+  }
 ): Promise<{ result: BackendTrackCheatResult; revision: number | null }> {
   let revision = cachedRevision;
 

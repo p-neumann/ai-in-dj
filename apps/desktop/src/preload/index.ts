@@ -70,6 +70,23 @@ export interface TrackCheatResult {
   fallbackDepth?: number;
   simulated?: boolean;
   error?: string;
+  chain?: { chainId: string; depth: number } | null;
+  trigger?: string | null;
+  mode?: string;
+  stateVersion?: number | null;
+  superseded?: boolean;
+}
+
+// Step 5, piece 4: one session event per DJ action (seedDropped, vote,
+// ...). The renderer owns clientSeq/stateVersion itself (plain numbers,
+// not secrets) and sends them here; the server derives all chain/bridge/
+// drift/exclusion state from the sequence of events, not from this result.
+export interface SessionEventResult {
+  ok: boolean;
+  accepted?: boolean;
+  stateVersion?: number;
+  duplicate?: boolean;
+  error?: string;
 }
 
 const api = {
@@ -95,11 +112,16 @@ const api = {
   backend: {
     checkHealth: (): Promise<BackendHealthResult> => ipcRenderer.invoke("backend:checkHealth"),
     createSession: (): Promise<BackendSessionResult> => ipcRenderer.invoke("backend:createSession"),
+    sendSessionEvent: (sessionId: string, event: Record<string, unknown>): Promise<SessionEventResult> =>
+      ipcRenderer.invoke("backend:sendSessionEvent", sessionId, event),
     recommendTrackCheat: (params: {
       seedTrackId: number;
       vibe: number;
       energy: number;
       playCountMode: string;
+      sessionId?: string;
+      clientSeq?: number;
+      expectedStateVersion?: number;
     }): Promise<TrackCheatResult> => ipcRenderer.invoke("backend:recommendTrackCheat", params)
   }
 };

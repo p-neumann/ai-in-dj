@@ -158,6 +158,80 @@ test("recommendTrackCheat: a network error is caught and reported, never thrown"
   assert.match(result.error, /ECONNREFUSED/);
 });
 
+// Step 5, piece 4 (daisy-chain/votes): sessionId/clientSeq/expectedStateVersion
+// are forwarded when the caller supplies them, and the response's chain/
+// trigger/stateVersion fields come straight through - this is what lets the
+// screen show chain depth and lets the next call carry the right clientSeq.
+
+test("recommendTrackCheat: forwards sessionId/clientSeq/expectedStateVersion, and returns chain/trigger/stateVersion", async () => {
+  const { recommendTrackCheat } = require("../src/main/backendClient.ts");
+
+  const serverResponse = {
+    ok: true,
+    data: {
+      results: [], candidatePoolSize: 1, requested: 20, returned: 0, fallbackDepth: 0, simulated: true,
+      chain: { chainId: "c_1", depth: 2 }, trigger: "daisyChain", mode: "none", stateVersion: 5, superseded: false
+    }
+  };
+
+  const result = await withStubbedFetch([{ ok: true, json: serverResponse }], async (calls) => {
+    const r = await recommendTrackCheat({
+      libraryRevision: 7, seedTrackId: 1, vibe: -3, energy: 0, playCountMode: "mix",
+      sessionId: "s_1", clientSeq: 3, expectedStateVersion: 4
+    });
+    const sentBody = JSON.parse(calls[0].options.body);
+    assert.equal(sentBody.sessionId, "s_1");
+    assert.equal(sentBody.clientSeq, 3);
+    assert.equal(sentBody.expectedStateVersion, 4);
+    return r;
+  });
+
+  assert.deepEqual(result.chain, { chainId: "c_1", depth: 2 });
+  assert.equal(result.trigger, "daisyChain");
+  assert.equal(result.stateVersion, 5);
+});
+
+test("sendSessionEvent: posts the event to the real per-session events path and returns the server's accepted/stateVersion", async () => {
+  const { sendSessionEvent } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch(
+    [{ ok: true, json: { ok: true, data: { accepted: true, stateVersion: 6, duplicate: false } } }],
+    async (calls) => {
+      const r = await sendSessionEvent("s_1", { type: "vote", trackId: 42, value: "down", clientSeq: 9 });
+      assert.equal(calls[0].url, "http://localhost:8080/v1/sessions/s_1/events");
+      assert.equal(calls[0].options.method, "POST");
+      const sentBody = JSON.parse(calls[0].options.body);
+      assert.deepEqual(sentBody, { type: "vote", trackId: 42, value: "down", clientSeq: 9 });
+      return r;
+    }
+  );
+
+  assert.deepEqual(result, { ok: true, accepted: true, stateVersion: 6, duplicate: false });
+});
+
+test("sendSessionEvent: a STALE_EVENT response carries its error code through, not just a message", async () => {
+  const { sendSessionEvent } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch(
+    [{ ok: false, status: 409, json: { ok: false, error: { code: "STALE_EVENT" } } }],
+    () => sendSessionEvent("s_1", { type: "vote", trackId: 1, value: "up", clientSeq: 1 })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "STALE_EVENT");
+});
+
+test("sendSessionEvent: a network error is caught and reported, never thrown", async () => {
+  const { sendSessionEvent } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch([{ throws: new Error("ECONNREFUSED") }], () =>
+    sendSessionEvent("s_1", { type: "vote", trackId: 1, value: "up", clientSeq: 1 })
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /ECONNREFUSED/);
+});
+
 test("syncLibraryToBackend: posts the lean track shape to /v1/library/sync and returns the revision", async () => {
   const { syncLibraryToBackend } = require("../src/main/backendClient.ts");
   const tracks = [{ id: 1, displayName: "A - B", artist: "A", title: "B", bpm: 120, key: "8A", genre: "house", year: 2020, playcount: 0 }];

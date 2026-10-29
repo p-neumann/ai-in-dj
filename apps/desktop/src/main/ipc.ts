@@ -12,8 +12,10 @@ import { appendHistoryEntry, listHistory } from "./db/history.ts";
 import {
   checkBackendHealth,
   createBackendSession,
+  sendSessionEvent,
   recommendTrackCheatWithAutoSync,
-  type BackendTrackCheatResult
+  type BackendTrackCheatResult,
+  type SessionEventResult
 } from "./backendClient.ts";
 
 function buildImportSummary(db: Database.Database, imported: ReturnType<typeof importLibraryFromCsvText>) {
@@ -136,11 +138,31 @@ export function registerBackendIpc(db: Database.Database): void {
   ipcMain.handle("backend:checkHealth", () => checkBackendHealth());
   ipcMain.handle("backend:createSession", () => createBackendSession());
 
+  // Step 5, piece 4 (daisy-chain/votes): the renderer owns the session's
+  // sessionId/clientSeq/stateVersion bookkeeping (plain numbers/ids, not
+  // secrets - same thing the manual-test harness already does) and sends
+  // one event per DJ action through this handler. This handler itself
+  // knows nothing about chain/bridge/drift - that derivation is entirely
+  // server-side (Phase 4, sessionEvents.js); it only relays the event.
+  ipcMain.handle(
+    "backend:sendSessionEvent",
+    (_event, sessionId: string, event: Record<string, unknown>): Promise<SessionEventResult> =>
+      sendSessionEvent(sessionId, event)
+  );
+
   ipcMain.handle(
     "backend:recommendTrackCheat",
     async (
       _event,
-      params: { seedTrackId: number; vibe: number; energy: number; playCountMode: string }
+      params: {
+        seedTrackId: number;
+        vibe: number;
+        energy: number;
+        playCountMode: string;
+        sessionId?: string;
+        clientSeq?: number;
+        expectedStateVersion?: number;
+      }
     ): Promise<BackendTrackCheatResult> => {
       const { result, revision } = await recommendTrackCheatWithAutoSync(
         () => getAllTracksForLibrary(db),

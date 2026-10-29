@@ -18,6 +18,17 @@ export function recommendTrackCheat(params: {
   vibe: number;
   energy: number;
   playCountMode: string;
+  sessionId?: string;
+  clientSeq?: number;
+  expectedStateVersion?: number;
 }): Promise<CcdjTrackCheatResult> {
   return window.ccdj.backend.recommendTrackCheat(params);
+}
+
+// Step 5, piece 4 (daisy-chain/votes): one session event per DJ action.
+export function sendSessionEvent(
+  sessionId: string,
+  event: Record<string, unknown>
+): Promise<CcdjSessionEventResult> {
+  return window.ccdj.backend.sendSessionEvent(sessionId, event);
 }
