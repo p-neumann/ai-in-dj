@@ -15,7 +15,7 @@
 // run at once; a second launch just focuses the first instead of opening
 // a second window.
 
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, dialog, shell } from "electron";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { openDatabase } from "./db/openDatabase.ts";
@@ -113,15 +113,35 @@ if (gotSingleInstanceLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     const dbPath = join(app.getPath("userData"), "ccdj.sqlite");
-    const opened = openDatabase(dbPath);
+    let opened;
+    try {
+      opened = await openDatabase(dbPath);
+    } catch (err) {
+      // CLAUDE.md Section 6.2: a database newer than this build, a failed
+      // backup, or a failed migration must never be used silently. No
+      // restore-a-snapshot UI exists yet, so "quit with instructions" (the
+      // other option CLAUDE.md allows) is the honest minimal behavior -
+      // a real native dialog, not just a console line, since this is the
+      // one failure mode severe enough to stop the app from opening at all.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[ccdj] Refusing to open the database - quitting. ${message}`);
+      dialog.showErrorBox("CCDJ - Database Error", message);
+      app.quit();
+      return;
+    }
     db = opened.db;
     if (opened.recoveredFromCorruption) {
       // CLAUDE.md Section 6.2: "tell the user." No real UI to tell them with
       // yet (that's a later step) - logged for now so this is at least
       // visible, not silent.
       console.warn(`Database at ${dbPath} was damaged and has been reset. The old file was kept at: ${opened.backupPath}`);
+    }
+    if (opened.preMigrationBackupPath) {
+      console.log(
+        `[ccdj] Migrated the database to the latest schema. A verified backup from just before the migration is at: ${opened.preMigrationBackupPath}`
+      );
     }
 
     registerLibraryIpc(db);
