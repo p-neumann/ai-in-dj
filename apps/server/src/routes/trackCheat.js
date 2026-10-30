@@ -57,14 +57,16 @@ import {
   applyTypeLock, injectTypeLockBalance
 } from "../engine/typeLock.js";
 import { getSession } from "../session/sessionStore.js";
-import { getLibraryForRevision } from "../library/libraryStore.js";
+import { getLibraryForRevision, LibraryOutOfSyncError } from "../library/libraryStore.js";
 
 export class ValidationError extends Error {}
 // CLAUDE.md Section 6.3's own documented error code - a client holding a
 // stale or never-synced libraryRevision is told plainly to resync and
 // retry, not served results that silently don't match what it thinks it
-// sent.
-export class LibraryOutOfSyncError extends Error {}
+// sent. Defined in library/libraryStore.js (docs/decisions/0011) so
+// crates.js can throw/catch the same class; re-exported here so existing
+// importers (app.js) don't need to change.
+export { LibraryOutOfSyncError };
 
 function buildRequestBody(seedName, ctx, system, allEx, likedNames, debugOverride) {
   const seedTitleWords = seedName.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")

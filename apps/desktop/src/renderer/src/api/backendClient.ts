@@ -32,3 +32,13 @@ export function sendSessionEvent(
 ): Promise<CcdjSessionEventResult> {
   return window.ccdj.backend.sendSessionEvent(sessionId, event);
 }
+
+// Step 5, piece 5 (Crate Cheat).
+export function buildCrate(params: {
+  prompt: string;
+  size: number;
+  crateVibePrompt?: string;
+  playCountMode: string;
+}): Promise<CcdjCrateResult> {
+  return window.ccdj.backend.buildCrate(params);
+}

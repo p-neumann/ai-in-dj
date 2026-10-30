@@ -89,6 +89,19 @@ export interface SessionEventResult {
   error?: string;
 }
 
+// Step 5, piece 5 (Crate Cheat).
+export interface CrateResult {
+  ok: boolean;
+  results?: Array<{ trackId: number; name: string; bpm: number; key: string }>;
+  requested?: number;
+  returned?: number;
+  candidatePoolSize?: number;
+  shortfallReason?: string | null;
+  knowledgeCallMade?: string | null;
+  simulated?: boolean;
+  error?: string;
+}
+
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
@@ -122,7 +135,13 @@ const api = {
       sessionId?: string;
       clientSeq?: number;
       expectedStateVersion?: number;
-    }): Promise<TrackCheatResult> => ipcRenderer.invoke("backend:recommendTrackCheat", params)
+    }): Promise<TrackCheatResult> => ipcRenderer.invoke("backend:recommendTrackCheat", params),
+    buildCrate: (params: {
+      prompt: string;
+      size: number;
+      crateVibePrompt?: string;
+      playCountMode: string;
+    }): Promise<CrateResult> => ipcRenderer.invoke("backend:buildCrate", params)
   }
 };
 

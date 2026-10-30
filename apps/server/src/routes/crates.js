@@ -12,9 +12,17 @@
 // sessionId is given, the session's own stored preferences are used
 // instead (doPlay/doNotPlay via the `sessionPrefs` event, styleProfile/
 // styleProfileEnrichment via PUT /v1/preferences - routes/preferences.js).
+//
+// docs/decisions/0011: accepts a libraryRevision the same way
+// track-cheat/recommend does (docs/decisions/0009), instead of only the
+// inline `library` this route originally took. Without this, Crate Cheat
+// would hit the exact same real HTTP 413 Track Cheat hit against a real
+// ~38k-track library sent inline on every call - same fix, same
+// reasoning, extended to a second route rather than re-discovering it.
 
 import { buildCrate, ValidationError, RequestTooLargeError } from "../engine/crateOrchestration.js";
 import { getSession } from "../session/sessionStore.js";
+import { getLibraryForRevision, LibraryOutOfSyncError } from "../library/libraryStore.js";
 import { mapProviderError } from "../providers/providerErrors.js";
 
 const CRATE_STALE_CAP = 100;
@@ -38,21 +46,38 @@ export function registerCrateRoutes(app, provider) {
     const promptKey = promptKeyFor(body.prompt);
     const shownSet = session ? (session.crateShownTracks[promptKey] || null) : null;
 
-    const input = {
-      library: body.library,
-      prompt: body.prompt,
-      playlistSize: body.size,
-      crateVibePrompt: body.crateVibePrompt || "",
-      styleProfile: body.styleProfile !== undefined ? body.styleProfile : ((session ? session.styleProfile : "") || ""),
-      styleProfileEnrichment: body.styleProfileEnrichment !== undefined ? body.styleProfileEnrichment : ((session ? session.styleProfileEnrichment : null) || null),
-      playCountMode: body.playCountMode || "mix",
-      doPlayList: body.doPlayList !== undefined ? body.doPlayList : ((session ? session.doPlay : []) || []),
-      doNotPlayList: body.doNotPlayList !== undefined ? body.doNotPlayList : ((session ? session.doNotPlay : []) || []),
-      vibeOffset: body.vibeOffset || 0,
-      shownSet
-    };
-
     try {
+      // Two ways a caller can supply the library: inline (small test
+      // fixtures, every existing test, unchanged) or by libraryRevision
+      // (the real desktop app, after a one-time sync - same pattern as
+      // track-cheat/recommend, docs/decisions/0009 and 0011).
+      let library = body.library;
+      if (!Array.isArray(library) || library.length === 0) {
+        if (body.libraryRevision !== null && body.libraryRevision !== undefined) {
+          const synced = getLibraryForRevision(body.libraryRevision);
+          if (!synced) {
+            throw new LibraryOutOfSyncError(
+              "libraryRevision " + body.libraryRevision + " is stale or was never synced - resync via POST /v1/library/sync and retry"
+            );
+          }
+          library = synced;
+        }
+      }
+
+      const input = {
+        library,
+        prompt: body.prompt,
+        playlistSize: body.size,
+        crateVibePrompt: body.crateVibePrompt || "",
+        styleProfile: body.styleProfile !== undefined ? body.styleProfile : ((session ? session.styleProfile : "") || ""),
+        styleProfileEnrichment: body.styleProfileEnrichment !== undefined ? body.styleProfileEnrichment : ((session ? session.styleProfileEnrichment : null) || null),
+        playCountMode: body.playCountMode || "mix",
+        doPlayList: body.doPlayList !== undefined ? body.doPlayList : ((session ? session.doPlay : []) || []),
+        doNotPlayList: body.doNotPlayList !== undefined ? body.doNotPlayList : ((session ? session.doNotPlay : []) || []),
+        vibeOffset: body.vibeOffset || 0,
+        shownSet
+      };
+
       const data = await buildCrate(input, provider);
       if (session && data.resultDisplayNames.length) {
         const existing = session.crateShownTracks[promptKey] || {};
@@ -71,6 +96,10 @@ export function registerCrateRoutes(app, provider) {
       if (err instanceof RequestTooLargeError) {
         reply.code(413);
         return { ok: false, error: { code: "REQUEST_TOO_LARGE", message: err.message } };
+      }
+      if (err instanceof LibraryOutOfSyncError) {
+        reply.code(409);
+        return { ok: false, error: { code: "LIBRARY_OUT_OF_SYNC", message: err.message } };
       }
       request.log?.error?.(err);
       const mapped = mapProviderError(err);

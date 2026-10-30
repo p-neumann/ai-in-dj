@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 import LibraryScreen from "./library/LibraryScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
+import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 
 type Check = {
   label: string;
@@ -110,9 +111,9 @@ export default function App(): React.JSX.Element {
         Step 1: window opens with the security locks on. Step 2: a real local database. Step 3: real library
         import, saved for good. Step 4: the rest of the locked-door bridge. Step 5, piece 1: a real, proven
         connection to the backend server, no AI yet. Step 5, piece 2 (below): the real, searchable, virtualized
-        Library screen - all tracks scroll smoothly, not just the first 500. Step 5, piece 3 (below): Track
-        Cheat core - seed, sliders, one real recommend call through the already-built backend. Next:
-        daisy-chain/votes.
+        Library screen - all tracks scroll smoothly, not just the first 500. Step 5, piece 3: Track
+        Cheat core. Step 5, piece 4: daisy-chain and votes, wired into Track Cheat's own session. Step 5,
+        piece 5 (below): Crate Cheat. Next: Playlist Cheat.
       </p>
 
       <section
@@ -175,6 +176,7 @@ export default function App(): React.JSX.Element {
 
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
       <TrackCheatScreen />
+      <CrateCheatScreen />
 
       <PreferencesSection />
       <HistorySection />

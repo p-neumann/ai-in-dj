@@ -81,6 +81,18 @@ interface CcdjSessionEventResult {
   error?: string;
 }
 
+interface CcdjCrateResult {
+  ok: boolean;
+  results?: Array<{ trackId: number; name: string; bpm: number; key: string }>;
+  requested?: number;
+  returned?: number;
+  candidatePoolSize?: number;
+  shortfallReason?: string | null;
+  knowledgeCallMade?: string | null;
+  simulated?: boolean;
+  error?: string;
+}
+
 interface Window {
   ccdj: {
     library: {
@@ -111,6 +123,12 @@ interface Window {
         clientSeq?: number;
         expectedStateVersion?: number;
       }) => Promise<CcdjTrackCheatResult>;
+      buildCrate: (params: {
+        prompt: string;
+        size: number;
+        crateVibePrompt?: string;
+        playCountMode: string;
+      }) => Promise<CcdjCrateResult>;
     };
   };
 }

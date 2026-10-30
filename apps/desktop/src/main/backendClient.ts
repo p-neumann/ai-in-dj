@@ -248,3 +248,85 @@ export async function recommendTrackCheatWithAutoSync(
 
   return { result, revision };
 }
+
+// Step 5, piece 5: Crate Cheat. Same libraryRevision shape as Track Cheat
+// (docs/decisions/0009, extended to the crate route by docs/decisions/
+// 0011) - without this, a crate build against the real library would hit
+// the exact same 413 Track Cheat did. No AI-selection logic lives here;
+// the real crate-building pipeline is server-side (Phase 3/4,
+// engine/crateOrchestration.js) and untouched by this piece.
+export interface BackendCrateRequest {
+  libraryRevision: number;
+  prompt: string;
+  size: number;
+  crateVibePrompt?: string;
+  playCountMode: string;
+}
+
+export interface BackendCrateResult {
+  ok: boolean;
+  errorCode?: string;
+  results?: Array<{ trackId: number; name: string; bpm: number; key: string }>;
+  requested?: number;
+  returned?: number;
+  candidatePoolSize?: number;
+  shortfallReason?: string | null;
+  knowledgeCallMade?: string | null;
+  simulated?: boolean;
+  error?: string;
+}
+
+export async function buildCrate(request: BackendCrateRequest): Promise<BackendCrateResult> {
+  try {
+    const res = await fetch(`${backendUrl()}/v1/crates/build`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify(request)
+    });
+    const body = (await res.json()) as {
+      ok: boolean;
+      data?: BackendCrateResult;
+      error?: { code?: string; message?: string };
+    };
+    if (!res.ok || !body.ok) {
+      return { ok: false, errorCode: body.error?.code, error: body.error?.message || `HTTP ${res.status}` };
+    }
+    return { ok: true, ...body.data };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// Same sync-if-needed / resync-and-retry-once-on-LIBRARY_OUT_OF_SYNC shape
+// as recommendTrackCheatWithAutoSync above - deliberately duplicated
+// rather than generalized into one shared helper, since the two requests
+// have different param shapes and this keeps each one trivially readable
+// and testable on its own.
+export async function buildCrateWithAutoSync(
+  getTracks: () => SyncLibraryTrack[],
+  cachedRevision: number | null,
+  params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string }
+): Promise<{ result: BackendCrateResult; revision: number | null }> {
+  let revision = cachedRevision;
+
+  if (revision === null) {
+    const synced = await syncLibraryToBackend(getTracks());
+    if (!synced.ok || synced.libraryRevision === undefined) {
+      return { result: { ok: false, error: synced.error || "sync failed" }, revision: null };
+    }
+    revision = synced.libraryRevision;
+  }
+
+  let result = await buildCrate({ libraryRevision: revision, ...params });
+
+  if (!result.ok && result.errorCode === "LIBRARY_OUT_OF_SYNC") {
+    const resynced = await syncLibraryToBackend(getTracks());
+    if (!resynced.ok || resynced.libraryRevision === undefined) {
+      return { result: { ok: false, error: resynced.error || "resync failed" }, revision };
+    }
+    revision = resynced.libraryRevision;
+    result = await buildCrate({ libraryRevision: revision, ...params });
+  }
+
+  return { result, revision };
+}

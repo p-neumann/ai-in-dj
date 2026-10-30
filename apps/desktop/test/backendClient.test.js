@@ -232,6 +232,132 @@ test("sendSessionEvent: a network error is caught and reported, never thrown", a
   assert.match(result.error, /ECONNREFUSED/);
 });
 
+// Step 5, piece 5 (Crate Cheat). docs/decisions/0011: buildCrate posts a
+// libraryRevision, never an inline library - the same real-413 fix Track
+// Cheat needed, extended to the crate route.
+
+test("buildCrate: posts a libraryRevision, never an inline library", async () => {
+  const { buildCrate } = require("../src/main/backendClient.ts");
+
+  const serverResponse = {
+    ok: true,
+    data: {
+      results: [{ trackId: 1, name: "A - B", bpm: 120, key: "8A" }],
+      requested: 10, returned: 1, candidatePoolSize: 50, shortfallReason: null, simulated: true
+    }
+  };
+
+  const result = await withStubbedFetch([{ ok: true, json: serverResponse }], async (calls) => {
+    const r = await buildCrate({ libraryRevision: 7, prompt: "house music", size: 10, playCountMode: "mix" });
+    assert.equal(calls[0].url, "http://localhost:8080/v1/crates/build");
+    assert.equal(calls[0].options.method, "POST");
+    const sentBody = JSON.parse(calls[0].options.body);
+    assert.deepEqual(sentBody, { libraryRevision: 7, prompt: "house music", size: 10, playCountMode: "mix" });
+    assert.equal(sentBody.library, undefined, "the request must never carry an inline library array");
+    return r;
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.results.length, 1);
+});
+
+test("buildCrate: a server-reported failure (ok:false) is returned as a clear error, not thrown", async () => {
+  const { buildCrate } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch(
+    [{ ok: false, status: 400, json: { ok: false, error: { message: "prompt must not be empty" } } }],
+    () => buildCrate({ libraryRevision: 1, prompt: "", size: 10, playCountMode: "mix" })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "prompt must not be empty");
+});
+
+test("buildCrate: a LIBRARY_OUT_OF_SYNC failure carries its error code through, not just a message", async () => {
+  const { buildCrate } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch(
+    [{ ok: false, status: 409, json: { ok: false, error: { code: "LIBRARY_OUT_OF_SYNC", message: "libraryRevision 999 is stale" } } }],
+    () => buildCrate({ libraryRevision: 999, prompt: "house music", size: 10, playCountMode: "mix" })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "LIBRARY_OUT_OF_SYNC");
+});
+
+test("buildCrate: a network error is caught and reported, never thrown", async () => {
+  const { buildCrate } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch([{ throws: new Error("ECONNREFUSED") }], () =>
+    buildCrate({ libraryRevision: 1, prompt: "house music", size: 10, playCountMode: "mix" })
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /ECONNREFUSED/);
+});
+
+test("buildCrateWithAutoSync: syncs first when there's no cached revision yet, then builds with it", async () => {
+  const { buildCrateWithAutoSync } = require("../src/main/backendClient.ts");
+  const tracks = [{ id: 1, displayName: "A - B", artist: "A", title: "B", bpm: 120, key: "8A", genre: "house", year: 2020, playcount: 0 }];
+
+  const { result, revision } = await withStubbedFetch(
+    [
+      { ok: true, json: { ok: true, data: { libraryRevision: 5, trackCount: 1 } } },
+      { ok: true, json: { ok: true, data: { results: [], requested: 10, returned: 0, candidatePoolSize: 1, shortfallReason: "POOL_TOO_SMALL", simulated: true } } }
+    ],
+    async (calls) => {
+      const r = await buildCrateWithAutoSync(() => tracks, null, { prompt: "house music", size: 10, playCountMode: "mix" });
+      assert.equal(calls[0].url, "http://localhost:8080/v1/library/sync", "must sync first when there's no cached revision");
+      assert.equal(calls[1].url, "http://localhost:8080/v1/crates/build");
+      assert.equal(JSON.parse(calls[1].options.body).libraryRevision, 5);
+      return r;
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(revision, 5);
+});
+
+test("buildCrateWithAutoSync: skips the sync call entirely when a revision is already cached", async () => {
+  const { buildCrateWithAutoSync } = require("../src/main/backendClient.ts");
+
+  const { result, revision } = await withStubbedFetch(
+    [{ ok: true, json: { ok: true, data: { results: [], requested: 10, returned: 0, candidatePoolSize: 1, shortfallReason: null, simulated: true } } }],
+    async (calls) => {
+      const r = await buildCrateWithAutoSync(() => [], 9, { prompt: "house music", size: 10, playCountMode: "mix" });
+      assert.equal(calls.length, 1, "no sync call should happen when a revision is already cached");
+      assert.equal(calls[0].url, "http://localhost:8080/v1/crates/build");
+      return r;
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(revision, 9);
+});
+
+test("buildCrateWithAutoSync: on LIBRARY_OUT_OF_SYNC, resyncs once and retries automatically - the caller never sees the raw error", async () => {
+  const { buildCrateWithAutoSync } = require("../src/main/backendClient.ts");
+
+  const { result, revision } = await withStubbedFetch(
+    [
+      { ok: false, status: 409, json: { ok: false, error: { code: "LIBRARY_OUT_OF_SYNC", message: "stale" } } },
+      { ok: true, json: { ok: true, data: { libraryRevision: 12, trackCount: 1 } } },
+      { ok: true, json: { ok: true, data: { results: [], requested: 10, returned: 0, candidatePoolSize: 1, shortfallReason: null, simulated: true } } }
+    ],
+    async (calls) => {
+      const r = await buildCrateWithAutoSync(() => [], 9, { prompt: "house music", size: 10, playCountMode: "mix" });
+      assert.equal(calls[0].url, "http://localhost:8080/v1/crates/build", "first attempt uses the stale cached revision");
+      assert.equal(calls[1].url, "http://localhost:8080/v1/library/sync", "resyncs automatically after LIBRARY_OUT_OF_SYNC");
+      assert.equal(calls[2].url, "http://localhost:8080/v1/crates/build");
+      assert.equal(JSON.parse(calls[2].options.body).libraryRevision, 12, "retries with the FRESH revision, not the stale one");
+      return r;
+    }
+  );
+
+  assert.equal(result.ok, true, "the DJ sees a successful result, never the raw LIBRARY_OUT_OF_SYNC error");
+  assert.equal(revision, 12, "the caller's cached revision is updated to the fresh one");
+});
+
 test("syncLibraryToBackend: posts the lean track shape to /v1/library/sync and returns the revision", async () => {
   const { syncLibraryToBackend } = require("../src/main/backendClient.ts");
   const tracks = [{ id: 1, displayName: "A - B", artist: "A", title: "B", bpm: 120, key: "8A", genre: "house", year: 2020, playcount: 0 }];

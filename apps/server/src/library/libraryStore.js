@@ -17,6 +17,14 @@
 // error code) - a client holding a stale revision is told plainly to
 // resync, not served silently-wrong results.
 
+// docs/decisions/0009 introduced this on the track-cheat route only;
+// defined here (not in routes/trackCheat.js) so any route backed by this
+// same store - crates.js included (docs/decisions/0011) - can throw and
+// catch the same error class without importing one route's file from
+// another's. trackCheat.js re-exports this for callers that already
+// import it from there (e.g. app.js).
+export class LibraryOutOfSyncError extends Error {}
+
 let currentRevision = 0;
 let tracksById = new Map();
 

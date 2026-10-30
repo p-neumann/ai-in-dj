@@ -14,7 +14,9 @@ import {
   createBackendSession,
   sendSessionEvent,
   recommendTrackCheatWithAutoSync,
+  buildCrateWithAutoSync,
   type BackendTrackCheatResult,
+  type BackendCrateResult,
   type SessionEventResult
 } from "./backendClient.ts";
 
@@ -165,6 +167,26 @@ export function registerBackendIpc(db: Database.Database): void {
       }
     ): Promise<BackendTrackCheatResult> => {
       const { result, revision } = await recommendTrackCheatWithAutoSync(
+        () => getAllTracksForLibrary(db),
+        cachedLibraryRevision,
+        params
+      );
+      cachedLibraryRevision = revision;
+      return result;
+    }
+  );
+
+  // Step 5, piece 5 (Crate Cheat) - shares the SAME cached revision as
+  // Track Cheat above: it's one synced library per server process, not
+  // one per feature, so there's exactly one thing to invalidate when a
+  // fresh import happens (library:importFromFile, above).
+  ipcMain.handle(
+    "backend:buildCrate",
+    async (
+      _event,
+      params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string }
+    ): Promise<BackendCrateResult> => {
+      const { result, revision } = await buildCrateWithAutoSync(
         () => getAllTracksForLibrary(db),
         cachedLibraryRevision,
         params
