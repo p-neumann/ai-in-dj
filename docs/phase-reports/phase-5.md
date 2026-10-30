@@ -223,3 +223,11 @@ Checklist run as planned, with one honest difference from how it was written: by
 Step 5, piece 3 is fully confirmed working, for real, with real AI - not just simulated.
 
 (The second-click-is-fast and stop-server/auto-resync checks from the original plan were not separately reported back - only the core recommend-against-real-AI result above is confirmed with evidence. Treat those two as still open if they matter later.)
+
+## Step 5, piece 5 - Crate Cheat (stopped mid-check, 2026-10-30)
+
+Crate Cheat screen built and committed (`6bf186a`), same pattern as Track Cheat. Ranjish's real-window check against his real library (real AI on) found a real bug: prompt "music for the hip hop", size 10, mix mode failed with `stop_reason:"max_tokens"` ("Response cut off..."). Confirmed with real evidence the Oct 12 max_tokens fix (`0008`) was present and unmodified, and computing the identical numbers (requestCount 15, ceiling 8700) as the scenario it was already tested against - so the formula wasn't the problem, but there was no logging anywhere to see what the model's real token usage actually was for that call.
+
+Added real per-call diagnostics logging and replaced the misleading "try a smaller track count" message (committed `ce1f4ce`, `docs/decisions/0012`). **The failing request has not been re-run yet with this logging in place** - that's the next step: re-run "music for the hip hop" / size 10 / mix against the real AI, read the real `outputTokens`/`thinkingTokens`/`stopReason` from the server console, and only then decide whether anything (a limit, a formula) should actually change.
+
+**Status: Crate Cheat is NOT yet confirmed working end-to-end with real AI.** Both commits above explicitly flag their real-window check as pending/incomplete. Stopped here for an exam; resume by re-running the same failing request.
