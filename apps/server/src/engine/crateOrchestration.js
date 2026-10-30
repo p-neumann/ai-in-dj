@@ -440,12 +440,52 @@ export async function runBuildCrateBody(input, provider) {
   const userContent = "Library:\n" + ctx.context + "\n\nVibe: " + prompt + "\n\nReturn exactly " + requestCount + " tracks matching this vibe.";
 
   const requestBody = { model: "claude-sonnet-5", max_tokens: dynamicMaxTokens, system: system, messages: [{ role: "user", content: userContent }] };
+  const startedAt = Date.now();
   const data = await provider.call(requestBody);
+  const elapsedMs = Date.now() - startedAt;
+
+  // docs/decisions/0012: same per-call token diagnostics Track Cheat
+  // already has (trackCheat.js's callAndResolve, docs/decisions/0010),
+  // ported here after a real size-10 "music for the hip hop" crate build
+  // hit stop_reason:"max_tokens" with no way to see what actually
+  // happened - the old code threw before ever reading `data.usage`, so
+  // the real numbers were discarded the instant the call failed. Logged
+  // unconditionally, BEFORE the success/failure branches below, so a
+  // cutoff still prints real numbers instead of nothing.
+  const usage = data.usage || {};
+  const callDiag = {
+    model: requestBody.model,
+    elapsedMs,
+    maxTokensAllowed: dynamicMaxTokens,
+    inputTokens: usage.input_tokens || 0,
+    outputTokens: usage.output_tokens || 0,
+    thinkingTokens: (usage.output_tokens_details && usage.output_tokens_details.thinking_tokens) || 0,
+    stopReason: data.stop_reason || null,
+    simulated: provider.kind !== "anthropic"
+  };
+  console.log(
+    "[crate-cheat] AI call: model=" + callDiag.model +
+    " elapsedMs=" + callDiag.elapsedMs + " maxTokensAllowed=" + callDiag.maxTokensAllowed +
+    " inputTokens=" + callDiag.inputTokens + " outputTokens=" + callDiag.outputTokens +
+    " thinkingTokens=" + callDiag.thinkingTokens + " stopReason=" + callDiag.stopReason +
+    (callDiag.simulated ? " (simulated)" : " (real)")
+  );
+
   if (!data.content || !Array.isArray(data.content)) {
     throw new ProviderError((data.error && data.error.message) || "API error", "PROVIDER_ERROR");
   }
   if (data.stop_reason === "max_tokens") {
-    throw new ProviderError("Response cut off — hit the token limit before finishing. Try a smaller track count.", "MODEL_OUTPUT_INVALID");
+    // Was "Try a smaller track count" - misleading: this exact ceiling
+    // (requestCount 15 -> 8700 max_tokens) is identical whether playlistSize
+    // is 10 or 25; a size-10 request already failed with it once (2026-10-30),
+    // so "try smaller" is not just unhelpful, it is not even true. State the
+    // real numbers we now have instead of guessing a remedy.
+    throw new ProviderError(
+      "Response cut off — the model hit its token limit before finishing (used " + callDiag.outputTokens +
+      " of " + callDiag.maxTokensAllowed + " allowed tokens, " + callDiag.thinkingTokens + " of that on thinking). " +
+      "This isn't caused by the crate size you picked. Try again, or try rewording the prompt.",
+      "MODEL_OUTPUT_INVALID"
+    );
   }
   const rawResponseText = data.content.map(function (b) { return b.text || ""; }).join("");
   let parsed;
