@@ -33,12 +33,14 @@ export function sendSessionEvent(
   return window.ccdj.backend.sendSessionEvent(sessionId, event);
 }
 
-// Step 5, piece 5 (Crate Cheat).
+// Step 5, piece 5 (Crate Cheat). sessionId added in docs/decisions/0015
+// so Crate Cheat shares the app's one session instead of sending none.
 export function buildCrate(params: {
   prompt: string;
   size: number;
   crateVibePrompt?: string;
   playCountMode: string;
+  sessionId?: string;
 }): Promise<CcdjCrateResult> {
   return window.ccdj.backend.buildCrate(params);
 }

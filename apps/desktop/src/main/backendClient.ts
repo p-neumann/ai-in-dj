@@ -261,6 +261,7 @@ export interface BackendCrateRequest {
   size: number;
   crateVibePrompt?: string;
   playCountMode: string;
+  sessionId?: string;
 }
 
 export interface BackendCrateResult {
@@ -305,7 +306,7 @@ export async function buildCrate(request: BackendCrateRequest): Promise<BackendC
 export async function buildCrateWithAutoSync(
   getTracks: () => SyncLibraryTrack[],
   cachedRevision: number | null,
-  params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string }
+  params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string; sessionId?: string }
 ): Promise<{ result: BackendCrateResult; revision: number | null }> {
   let revision = cachedRevision;
 

@@ -14,9 +14,15 @@
 // resync-on-LIBRARY_OUT_OF_SYNC flow (buildCrateWithAutoSync) instead of
 // re-triggering the real HTTP 413 Track Cheat hit against a real library
 // sent inline.
+//
+// docs/decisions/0015: now sends the app's one shared sessionId with
+// every build. Before this, Crate Cheat sent no session id at all, so
+// Do Not Play/Do Play and thumbs-down exclusions from the same gig never
+// reached it - this is the fix for that, not a new feature.
 
 import { useState } from "react";
 import { buildCrate } from "../api/backendClient";
+import type { SharedSession } from "../App";
 
 // CLAUDE.md's own documented menu (R4) - six sizes, not an arbitrary range.
 const CRATE_SIZES = [10, 25, 50, 100, 150, 200] as const;
@@ -27,7 +33,11 @@ type ResultState =
   | { status: "done"; data: CcdjCrateResult }
   | { status: "error"; message: string };
 
-export default function CrateCheatScreen(): React.JSX.Element {
+interface CrateCheatScreenProps {
+  sharedSession: SharedSession | null;
+}
+
+export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProps): React.JSX.Element {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<number>(10);
   const [crateVibePrompt, setCrateVibePrompt] = useState("");
@@ -38,13 +48,18 @@ export default function CrateCheatScreen(): React.JSX.Element {
 
   async function handleBuildCrate(): Promise<void> {
     if (!prompt.trim()) return;
+    if (!sharedSession) {
+      setResult({ status: "error", message: "Still connecting to the backend session - try again in a moment." });
+      return;
+    }
     setResult({ status: "loading" });
     try {
       const data = await buildCrate({
         prompt: prompt.trim(),
         size,
         crateVibePrompt: crateVibePrompt.trim() || undefined,
-        playCountMode
+        playCountMode,
+        sessionId: sharedSession.sessionId
       });
       if (!data.ok) {
         setResult({ status: "error", message: data.error ?? "Unknown error" });

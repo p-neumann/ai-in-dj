@@ -128,6 +128,7 @@ interface Window {
         size: number;
         crateVibePrompt?: string;
         playCountMode: string;
+        sessionId?: string;
       }) => Promise<CcdjCrateResult>;
     };
   };

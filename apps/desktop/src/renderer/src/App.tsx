@@ -12,6 +12,19 @@ import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
 
+// docs/decisions/0015: ONE session, created once here, shared by every
+// screen that talks to the backend - Track Cheat, Crate Cheat, and later
+// Settings. Before this, each screen created its own session, so a
+// thumbs-down in Track Cheat had no way to reach Crate Cheat's Do Not
+// Play/staleness checks. That was never Mike's design; it was a side
+// effect of building each screen separately. Plumbing only - no
+// recommendation logic changes here.
+export interface SharedSession {
+  sessionId: string;
+  chainId: string | null;
+  stateVersion: number;
+}
+
 type Check = {
   label: string;
   detail: string;
@@ -66,6 +79,7 @@ export default function App(): React.JSX.Element {
 
   const [importState, setImportState] = useState<ImportState>({ status: "loading" });
   const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
+  const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
 
   // On startup, show whatever was already imported and saved, rather than
   // looking empty until the DJ re-imports a file that's genuinely already
@@ -74,6 +88,21 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     window.ccdj.library.getStatus().then((status) => {
       setImportState(status.count > 0 ? { status: "saved", ...status } : { status: "empty" });
+    });
+  }, []);
+
+  // One session for the whole app, created once (docs/decisions/0015).
+  // Every screen that needs the server gets this same one as a prop,
+  // instead of making its own.
+  useEffect(() => {
+    createBackendSession().then((created) => {
+      if (created.ok && created.sessionId) {
+        setSharedSession({
+          sessionId: created.sessionId,
+          chainId: created.chainId ?? null,
+          stateVersion: created.stateVersion ?? 0
+        });
+      }
     });
   }, []);
 
@@ -176,8 +205,8 @@ export default function App(): React.JSX.Element {
       </section>
 
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
-      <TrackCheatScreen />
-      <CrateCheatScreen />
+      <TrackCheatScreen sharedSession={sharedSession} />
+      <CrateCheatScreen sharedSession={sharedSession} />
       <PlaylistCheatScreen />
 
       <PreferencesSection />

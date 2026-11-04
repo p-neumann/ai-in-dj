@@ -184,7 +184,7 @@ export function registerBackendIpc(db: Database.Database): void {
     "backend:buildCrate",
     async (
       _event,
-      params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string }
+      params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string; sessionId?: string }
     ): Promise<BackendCrateResult> => {
       const { result, revision } = await buildCrateWithAutoSync(
         () => getAllTracksForLibrary(db),

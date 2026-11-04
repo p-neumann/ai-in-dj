@@ -17,8 +17,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { filterTracks } from "../library/filterTracks";
-import { recommendTrackCheat, createBackendSession, sendSessionEvent } from "../api/backendClient";
+import { recommendTrackCheat, sendSessionEvent } from "../api/backendClient";
 import { getVibeLabel } from "./vibeLabels";
+import type { SharedSession } from "../App";
 
 type ResultState =
   | { status: "idle" }
@@ -34,7 +35,11 @@ interface SessionState {
   chainDepth: number;
 }
 
-export default function TrackCheatScreen(): React.JSX.Element {
+interface TrackCheatScreenProps {
+  sharedSession: SharedSession | null;
+}
+
+export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProps): React.JSX.Element {
   const [allTracks, setAllTracks] = useState<CcdjLibraryRow[] | null>(null);
   const [seedSearch, setSeedSearch] = useState("");
   const [seedTrackId, setSeedTrackId] = useState<number | null>(null);
@@ -61,24 +66,28 @@ export default function TrackCheatScreen(): React.JSX.Element {
 
   useEffect(() => {
     window.ccdj.library.getAllTracks().then(setAllTracks);
-    // One session per time this screen is open - matches the manual-test
-    // harness's own pattern. A real "new gig = new session" boundary is
-    // later UI work (Account/Settings, piece 7); this is enough to prove
-    // daisy-chain/votes actually reach the server's session state.
-    createBackendSession().then((created) => {
-      if (created.ok && created.sessionId) {
-        const initial: SessionState = {
-          sessionId: created.sessionId,
-          clientSeq: 0,
-          stateVersion: created.stateVersion ?? 0,
-          chainId: created.chainId ?? null,
-          chainDepth: 0
-        };
-        sessionRef.current = initial;
-        setSessionDisplay(initial);
-      }
-    });
   }, []);
+
+  // docs/decisions/0015: this screen no longer creates its own session -
+  // it's seeded from the one shared session App.tsx creates once for the
+  // whole app, so a thumbs-down here is visible to Crate Cheat too. Only
+  // seeds on the FIRST time the shared session arrives (sessionRef still
+  // null) - this screen's own clientSeq/chainDepth evolve independently
+  // after that as the DJ uses Track Cheat, and must not be reset every
+  // time App.tsx happens to re-render.
+  useEffect(() => {
+    if (sharedSession && !sessionRef.current) {
+      const initial: SessionState = {
+        sessionId: sharedSession.sessionId,
+        clientSeq: 0,
+        stateVersion: sharedSession.stateVersion,
+        chainId: sharedSession.chainId,
+        chainDepth: 0
+      };
+      sessionRef.current = initial;
+      setSessionDisplay(initial);
+    }
+  }, [sharedSession]);
 
   const seedMatches = useMemo(
     () => (allTracks ? filterTracks(allTracks, seedSearch).slice(0, 20) : []),
@@ -103,26 +112,17 @@ export default function TrackCheatScreen(): React.JSX.Element {
   // updated session state (CLAUDE.md 4.1 - these are genuinely different
   // events, not the same action with a different label).
   async function recommendForSeed(trackId: number, origin: "external" | "ccdjResult"): Promise<void> {
+    // docs/decisions/0015: no longer creates a fallback session of its
+    // own here - doing that was exactly the bug being fixed (a second,
+    // divergent session Crate Cheat would never see). If the app's one
+    // shared session hasn't arrived yet, wait for it instead.
+    let session = sessionRef.current;
+    if (!session) {
+      setResult({ status: "error", message: "Still connecting to the backend session - try again in a moment." });
+      return;
+    }
     setResult({ status: "loading" });
     try {
-      let session = sessionRef.current;
-      if (!session) {
-        const created = await createBackendSession();
-        if (!created.ok || !created.sessionId) {
-          setResult({ status: "error", message: created.error ?? "Could not create a session" });
-          return;
-        }
-        session = {
-          sessionId: created.sessionId,
-          clientSeq: 0,
-          stateVersion: created.stateVersion ?? 0,
-          chainId: created.chainId ?? null,
-          chainDepth: 0
-        };
-        sessionRef.current = session;
-        setSessionDisplay(session);
-      }
-
       const seedSeq = session.clientSeq + 1;
       const eventRes = await sendSessionEvent(session.sessionId, {
         type: "seedDropped",

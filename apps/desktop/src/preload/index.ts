@@ -141,6 +141,7 @@ const api = {
       size: number;
       crateVibePrompt?: string;
       playCountMode: string;
+      sessionId?: string;
     }): Promise<CrateResult> => ipcRenderer.invoke("backend:buildCrate", params)
   }
 };
