@@ -10,6 +10,7 @@ import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 import LibraryScreen from "./library/LibraryScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
+import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
 
 type Check = {
   label: string;
@@ -177,6 +178,7 @@ export default function App(): React.JSX.Element {
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
       <TrackCheatScreen />
       <CrateCheatScreen />
+      <PlaylistCheatScreen />
 
       <PreferencesSection />
       <HistorySection />
