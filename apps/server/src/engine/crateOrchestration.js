@@ -335,18 +335,40 @@ export async function runBuildCrateBody(input, provider) {
   const requestCount = strictArtistLock
     ? Math.min(playlistSize + 35, Math.max(playlistSize, distinctArtistSongCount + 5))
     : playlistSize + nonLockExtra;
-  // Was Math.min(8000, 2500 + requestCount*180). Raised 2026-10-07
-  // (docs/decisions/0008) after a real, billed call against the real
-  // ~38k-track library hit this exact ceiling: requestCount 15 produced
-  // 5200, and the model's thinking alone used 4522 of it - leaving only
-  // 678 tokens, not enough to finish the answer (it stopped mid-array
-  // after 10 of 15 requested tracks). Same root cause as the Track Cheat
-  // fix (docs/decisions/0006, 0007): Sonnet 5's default thinking bills
-  // against this same ceiling. Raised the base and the outer cap so the
-  // same request now gets 8700 - about 4200 tokens of headroom beyond the
-  // thinking usage actually observed, instead of 678. Still scales with
-  // requestCount exactly as before - only the two numbers changed.
-  const dynamicMaxTokens = Math.min(16000, 6000 + requestCount * 180);
+  // STOPGAP, 3rd time for this same failure (docs/decisions/0013):
+  // 2026-10-07 (0008) and 2026-10-12 (0de72f9) both raised this as
+  // `Math.min(cap, base + requestCount*180)` - a single number that blended
+  // "room for thinking" and "room for the answer" together, and shrank as
+  // requestCount got smaller. That shape was the bug: a real size-10 call
+  // (requestCount 15) failed again on 2026-10-30 with thinking at 5654 of
+  // an 8700 ceiling, leaving only 2099 tokens - and three real calls that
+  // same day (5654/2898/1869 thinking tokens, pool sizes 327/758/664) show
+  // thinking does NOT scale with requestCount or candidate-pool size - it
+  // varies independently of both. A margin that shrinks with request size
+  // is therefore sized against the wrong variable.
+  //
+  // Fix: split the formula into two independent terms instead of one
+  // blended one.
+  //   - CRATE_THINKING_MARGIN (flat, does not scale with requestCount):
+  //     12000 - about 2.1x the worst real Crate Cheat thinking draw seen
+  //     so far (5654), and about 1.5x the worst thinking seen on ANY real
+  //     call against this model/effort in this app, including Track
+  //     Cheat's own A/B/C/D comparison (7711, docs/QUESTIONS.md). Using
+  //     the higher of the two real worst-cases, not just this feature's
+  //     own, since nothing suggests Crate Cheat's thinking is capped
+  //     below what the same model/effort has already done elsewhere.
+  //   - CRATE_ANSWER_TOKENS_PER_TRACK (scales with requestCount, same as
+  //     before - this part IS legitimately request-size-dependent, since
+  //     a bigger JSON array really does need more tokens): 70 tokens,
+  //     rounded up from the one real call where both requestCount and the
+  //     actual visible-answer size are known (947 tokens / 15 tracks =
+  //     63.1/track).
+  // Outer cap (16000) unchanged - both real failures so far were at the
+  // small end (requestCount 15); nothing suggests the large end needs
+  // more room, so it isn't being touched here.
+  const CRATE_THINKING_MARGIN = 12000;
+  const CRATE_ANSWER_TOKENS_PER_TRACK = 70;
+  const dynamicMaxTokens = Math.min(16000, CRATE_THINKING_MARGIN + requestCount * CRATE_ANSWER_TOKENS_PER_TRACK);
   const candidatePoolSize = ctx.indexed.length;
   const simulated = provider.kind !== "anthropic";
 

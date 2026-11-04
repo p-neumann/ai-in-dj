@@ -85,8 +85,30 @@ export async function resolveCuratedTracks(promptText, curationCount, provider) 
     system: "A DJ typed a request into a track-recommendation tool and nothing in the app's built-in genre/artist detection matched it. Determine whether a knowledgeable, culturally-fluent DJ would have specific real songs in mind for this exact request. This includes named genres/styles/subgenres/eras (New Jack Swing, Go-Go, Quiet Storm, Baltimore Club) AND occasion/context/crowd-based requests where real music knowledge produces a specific answer even though no genre is named at all (example: \"grown and sexy playlist for an all-Black wedding reception, ages 30-60\" has a real, knowable answer — Frankie Beverly and Maze, Guy, R. Kelly, Motown — despite naming no genre). Do NOT recognize vague requests with no real specific answer (e.g. \"high energy\" or \"something fun\", which have no knowable specific song list). Return ONLY valid JSON, no markdown, no extra text, in this exact shape: {\"recognized\":true|false,\"tracks\":[{\"artist\":\"...\",\"track\":\"...\"}],\"bpmMin\":number|null,\"bpmMax\":number|null,\"eraStart\":number|null,\"eraEnd\":number|null}. If recognized is true: \"tracks\" must be a curated list of " + curationCount + " REAL, SPECIFIC songs (both artist and title) that a knowledgeable DJ would actually pick for this exact request — the same quality of answer an expert gives when asked directly, not a generic genre-name list. Prioritize genuine variety across different artists — don't over-concentrate on just 2-3 names even if they're the most famous. bpmMin/bpmMax and eraStart/eraEnd (as 4-digit years) are optional best-effort context, null if not confidently known. If recognized is false, return {\"recognized\":false,\"tracks\":[],\"bpmMin\":null,\"bpmMax\":null,\"eraStart\":null,\"eraEnd\":null} and nothing else.",
     messages: [{ role: "user", content: promptText }]
   };
+  const startedAt = Date.now();
   try {
     const data = await provider.call(requestBody);
+    const elapsedMs = Date.now() - startedAt;
+
+    // docs/decisions/0013: this knowledge call was invisible - a real,
+    // separately billed AI call (triggered whenever buildCrate's gating
+    // decides the prompt needs real-world music knowledge, e.g. "late
+    // night vibes") with no logging anywhere, unlike the main build call
+    // (crateOrchestration.js, docs/decisions/0012) or Track Cheat
+    // (trackCheat.js, docs/decisions/0010). Same pattern as both: log
+    // immediately after the call returns, before any success/error/
+    // truncation branch, so a failure here doesn't erase the real numbers
+    // either.
+    const usage = (data && data.usage) || {};
+    console.log(
+      "[crate-cheat] knowledge call (curatedTracks): model=" + requestBody.model +
+      " elapsedMs=" + elapsedMs + " maxTokensAllowed=" + dynamicMaxTokens +
+      " inputTokens=" + (usage.input_tokens || 0) + " outputTokens=" + (usage.output_tokens || 0) +
+      " thinkingTokens=" + ((usage.output_tokens_details && usage.output_tokens_details.thinking_tokens) || 0) +
+      " stopReason=" + (data && data.stop_reason || null) +
+      (provider.kind !== "anthropic" ? " (simulated)" : " (real)")
+    );
+
     if (data && (data.error || data.type === "error")) {
       const errMsg = (data.error && (data.error.message || data.error.type)) || "Unknown API error";
       return { recognized: false, tracks: [], _apiError: true, _rawText: String(errMsg).slice(0, 400) };
