@@ -150,6 +150,16 @@ test("an upgrade backs up rows that exist only in the -wal file", async (t) => {
       [{ value: "a" }, { value: "b" }, { value: "c" }]
     );
     assert.ok(!tablesOf(backupPath).includes("notes"));
+
+    // The backup is one self-contained file: no -wal/-shm beside it or its temp name.
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.startsWith("ccdj-db.v1.bak")),
+      ["ccdj-db.v1.bak"]
+    );
+    assert.equal(
+      withDb(backupPath, (db) => db.pragma("journal_mode", { simple: true }), { readonly: true }),
+      "delete"
+    );
   } finally {
     writer.close();
   }

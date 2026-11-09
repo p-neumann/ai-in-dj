@@ -37,6 +37,7 @@ export async function createVerifiedBackup(
   rmSync(tmpPath, { force: true });
   try {
     await source.backup(tmpPath);
+    makeSelfContained(tmpPath);
     verifyBackup(tmpPath, { version, rowCounts: tableRowCounts(source) });
     renameSync(tmpPath, finalPath);
   } catch (err) {
@@ -44,6 +45,23 @@ export async function createVerifiedBackup(
     throw err;
   }
   return finalPath;
+}
+
+// The backup API copies the source's header, so a WAL source gives a WAL
+// backup, and any later open (even read-only) creates -wal/-shm files beside
+// it that a rename would leave behind. Switching the copy to rollback-journal
+// mode makes it one self-contained file. Closing this, the only connection,
+// removes its side files. openDatabase() turns WAL back on if it is restored.
+function makeSelfContained(path: string): void {
+  const db = new Database(path, { fileMustExist: true });
+  try {
+    const mode = db.pragma("journal_mode = DELETE", { simple: true });
+    if (mode !== "delete") {
+      throw new Error(`could not make backup self-contained (SQLite reported ${String(mode)})`);
+    }
+  } finally {
+    db.close();
+  }
 }
 
 // Opens the copy read-only and checks it is a sound database holding the same
