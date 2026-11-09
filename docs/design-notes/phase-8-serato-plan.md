@@ -15,7 +15,7 @@ Goal: no one builds the same thing twice, and nothing is called done until it wo
 
 | # | Prerequisite | Owner | Status |
 |---|---|---|---|
-| 1 | Mike's Serato version (Pro/Lite + number) and macOS version | Hannah (asked by email 2026-11-09) | Waiting |
+| 1 | Mike's Serato version (Pro/Lite + number) and macOS version | Hannah (asked by email 2026-11-09) | **Answered 2026-11-09:** Serato DJ **Pro 5.0.0** (build 5001236, arm64) on **macOS Sonoma 14.6.1** |
 | 2 | Share `docs/serato-spike.md` with Mike (Phase 2S gate) | Hannah | Not done |
 | 3 | Phase 5 finished: Hannah's database layer combined into the app | Hannah + Ranjish | In progress |
 | 4 | 8a re-confirmed on a Mac, and **Mike approves the findings** (CLAUDE.md §9, human gate) | Ranjish runs it, Mike approves | Not started |
@@ -56,7 +56,7 @@ Use the spike's method: snapshot files with true size + SHA-256, do one action i
 3. Drag from Serato (library, crate, deck) into `spikes/serato/drag-test/`: what arrives? Drag out onto a deck and onto a crate: does Serato take it?
 4. Write a test `.crate` with Serato closed, then with it open: same import / delete behaviour as on Windows?
 
-Record the Serato version, macOS version and results in `docs/serato-spike.md` under a new "macOS" section. Repeat each observation at least twice.
+**Target:** Mike's setup is Serato DJ Pro 5.0.0 (arm64) on macOS Sonoma 14.6.1; the spike was Serato DJ Lite 4.0.10 on Windows, so edition, version and OS all differ. Record the Serato edition and version, macOS version and results in `docs/serato-spike.md` under a new "macOS" section. Repeat each observation at least twice.
 
 ## Questions for Ranjish
 
