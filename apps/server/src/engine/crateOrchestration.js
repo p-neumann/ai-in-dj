@@ -39,6 +39,7 @@ import { inferArtistEra } from "./artistLookup.js";
 import { shuffleArr } from "./shuffleArr.js";
 import { parseJSON } from "./parsing.js";
 import { ProviderError } from "../providers/providerErrors.js";
+import { callWithEffortRetry } from "../providers/callWithEffortRetry.js";
 import {
   GENRE_KEYWORDS_IN_PROMPT, ERA_KEYWORD_YEAR_RANGE,
   extractGenreFromPrompt, extractEraFromPrompt, extractBpmFromPrompt,
@@ -209,7 +210,12 @@ export async function runBuildCrateBody(input, provider) {
     crateVibePrompt = "", styleProfile = "", styleProfileEnrichment = null,
     playCountMode = "mix", doPlayList = [], doNotPlayList = [],
     vibeOffset = 0, shownSet = null,
-    unknownGenreAnchors = null, resolvedEraRange = null
+    unknownGenreAnchors = null, resolvedEraRange = null,
+    // docs/decisions/0017: real, shipped testing control (a dropdown on
+    // the Crate Cheat screen, clearly labeled as such) - Crate Cheat had
+    // no effort override at all before this. Omitted or {effort:"high"}
+    // sends byte-for-byte what shipped before.
+    debugOverride = null
   } = input;
 
   const promptGenre = extractGenreFromPrompt(prompt);
@@ -462,9 +468,14 @@ export async function runBuildCrateBody(input, provider) {
   const userContent = "Library:\n" + ctx.context + "\n\nVibe: " + prompt + "\n\nReturn exactly " + requestCount + " tracks matching this vibe.";
 
   const requestBody = { model: "claude-sonnet-5", max_tokens: dynamicMaxTokens, system: system, messages: [{ role: "user", content: userContent }] };
-  const startedAt = Date.now();
-  const data = await provider.call(requestBody);
-  const elapsedMs = Date.now() - startedAt;
+  if (debugOverride && debugOverride.effort) {
+    requestBody.output_config = { effort: debugOverride.effort };
+  }
+  // docs/decisions/0017: callWithEffortRetry watches for a cut-off
+  // response or a ~45s stall and retries once at low effort before this
+  // function ever sees the response - `data` below is whichever attempt
+  // actually came back, same as before this existed.
+  const { response: data, elapsedMs, effortUsed, retried, retryReason } = await callWithEffortRetry(provider, requestBody);
 
   // docs/decisions/0012: same per-call token diagnostics Track Cheat
   // already has (trackCheat.js's callAndResolve, docs/decisions/0010),
@@ -477,19 +488,23 @@ export async function runBuildCrateBody(input, provider) {
   const usage = data.usage || {};
   const callDiag = {
     model: requestBody.model,
+    effort: effortUsed,
     elapsedMs,
     maxTokensAllowed: dynamicMaxTokens,
     inputTokens: usage.input_tokens || 0,
     outputTokens: usage.output_tokens || 0,
     thinkingTokens: (usage.output_tokens_details && usage.output_tokens_details.thinking_tokens) || 0,
     stopReason: data.stop_reason || null,
+    retried,
+    retryReason,
     simulated: provider.kind !== "anthropic"
   };
   console.log(
-    "[crate-cheat] AI call: model=" + callDiag.model +
+    "[crate-cheat] AI call: model=" + callDiag.model + " effort=" + callDiag.effort +
     " elapsedMs=" + callDiag.elapsedMs + " maxTokensAllowed=" + callDiag.maxTokensAllowed +
     " inputTokens=" + callDiag.inputTokens + " outputTokens=" + callDiag.outputTokens +
     " thinkingTokens=" + callDiag.thinkingTokens + " stopReason=" + callDiag.stopReason +
+    " retried=" + callDiag.retried + (retryReason ? " retryReason=" + retryReason : "") +
     (callDiag.simulated ? " (simulated)" : " (real)")
   );
 
@@ -600,6 +615,9 @@ export async function runBuildCrateBody(input, provider) {
     candidatePoolSize: candidatePoolSize,
     shortfallReason: shortfallReason,
     simulated: simulated,
+    effortUsed: effortUsed,
+    retried: retried,
+    retryReason: retryReason,
     // caller (routes/crates.js) uses this to update per-prompt staleness
     // tracking (source: setCrateShownTracks) - not meaningful on its own.
     resultDisplayNames: results.map(function (r) { return r.name; })

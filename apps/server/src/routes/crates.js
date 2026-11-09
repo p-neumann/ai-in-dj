@@ -75,7 +75,11 @@ export function registerCrateRoutes(app, provider) {
         doPlayList: body.doPlayList !== undefined ? body.doPlayList : ((session ? session.doPlay : []) || []),
         doNotPlayList: body.doNotPlayList !== undefined ? body.doNotPlayList : ((session ? session.doNotPlay : []) || []),
         vibeOffset: body.vibeOffset || 0,
-        shownSet
+        shownSet,
+        // docs/decisions/0017: real, shipped testing control from the
+        // Crate Cheat screen's effort dropdown. Absent, or {effort:"high"},
+        // sends byte-for-byte what shipped before.
+        debugOverride: body.debugOverride || null
       };
 
       const data = await buildCrate(input, provider);

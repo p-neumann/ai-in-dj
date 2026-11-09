@@ -58,6 +58,7 @@ import {
 } from "../engine/typeLock.js";
 import { getSession } from "../session/sessionStore.js";
 import { getLibraryForRevision, LibraryOutOfSyncError } from "../library/libraryStore.js";
+import { callWithEffortRetry } from "../providers/callWithEffortRetry.js";
 
 export class ValidationError extends Error {}
 // CLAUDE.md Section 6.3's own documented error code - a client holding a
@@ -81,12 +82,15 @@ function buildRequestBody(seedName, ctx, system, allEx, likedNames, debugOverrid
   // entirely until caught while wiring the liked-tracks line below.
   const exN = allEx && allEx.length ? "\nDo NOT include:\n" + allEx.join("\n") : "";
   const likedN = likedNames && likedNames.length ? "\nDJ liked these:\n" + likedNames.join("\n") : "";
-  // debugOverride (docs/decisions/0010): test-only model/effort override
-  // for the blind A/B/C comparison Ranjish is running against the real
-  // 2-minute-latency report. Never set by the real desktop app's normal
-  // Track Cheat call - only by the manual test harness. Default stays
-  // exactly what shipped before: claude-sonnet-5, no explicit effort
-  // (Anthropic's own default is "high").
+  // debugOverride: started as a test-only model/effort override for the
+  // Oct 29 A/B/C comparison (docs/decisions/0010). docs/decisions/0017
+  // promotes the effort half of it to a real, shipped testing control -
+  // a dropdown on the Track Cheat screen, clearly labeled as such -
+  // while model stays fixed at claude-sonnet-5 either way. The dropdown
+  // always sends its current value explicitly - an untouched dropdown
+  // sends "high", which is byte-for-byte what shipped before (Anthropic's
+  // own default for this model), so nothing changes for anyone who never
+  // touches it.
   const body = {
     model: (debugOverride && debugOverride.model) || "claude-sonnet-5",
     // Was 2000 (prototype-era), raised to 6000 on 2026-10-06 (docs/decisions/
@@ -126,9 +130,11 @@ function buildRequestBody(seedName, ctx, system, allEx, likedNames, debugOverrid
 // that was thinking tokens or something else.
 async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effectiveRange, allEx, playedNames, likedNames, debugOverride) {
   const requestBody = buildRequestBody(seedName, ctx, system, allEx, likedNames, debugOverride);
-  const startedAt = Date.now();
-  const response = await provider.call(requestBody);
-  const elapsedMs = Date.now() - startedAt;
+  // docs/decisions/0017: callWithEffortRetry watches for a cut-off
+  // response or a ~45s stall and retries once at low effort before this
+  // function ever sees the response - everything below operates on
+  // whichever attempt actually came back.
+  const { response, elapsedMs, effortUsed, retried, retryReason } = await callWithEffortRetry(provider, requestBody);
   if (!response.content || !Array.isArray(response.content)) {
     throw new ProviderError((response.error && response.error.message) || "Provider returned no content", "PROVIDER_ERROR");
   }
@@ -143,17 +149,21 @@ async function callAndResolve(provider, seedName, ctx, system, vibeForSort, effe
   const usage = response.usage || {};
   const callDiag = {
     model: requestBody.model,
-    effort: (requestBody.output_config && requestBody.output_config.effort) || "default",
+    effort: effortUsed,
     elapsedMs,
     inputTokens: usage.input_tokens || 0,
     outputTokens: usage.output_tokens || 0,
     thinkingTokens: (usage.output_tokens_details && usage.output_tokens_details.thinking_tokens) || 0,
+    stopReason: response.stop_reason || null,
+    retried,
+    retryReason,
     simulated: provider.kind !== "anthropic"
   };
   console.log(
     "[track-cheat] AI call: model=" + callDiag.model + " effort=" + callDiag.effort +
     " elapsedMs=" + callDiag.elapsedMs + " inputTokens=" + callDiag.inputTokens +
     " outputTokens=" + callDiag.outputTokens + " thinkingTokens=" + callDiag.thinkingTokens +
+    " stopReason=" + callDiag.stopReason + " retried=" + callDiag.retried + (retryReason ? " retryReason=" + retryReason : "") +
     (callDiag.simulated ? " (simulated)" : " (real)")
   );
 
@@ -462,6 +472,12 @@ export async function recommendTrackCheat(request, provider) {
   // alone can't show, built to diagnose the real reported 2-minute
   // single-call latency instead of guessing at its cause.
   const timingsMs = { ai: aiCalls.reduce((sum, c) => sum + c.elapsedMs, 0) };
+  // docs/decisions/0017: a plain top-level summary of the LAST real call
+  // (the one whose result is actually being returned), so the desktop
+  // diagnostics line doesn't need to dig into aiCalls for the common
+  // case - aiCalls itself is unchanged, for anyone who wants the full
+  // per-attempt breakdown (e.g. an R28 fallback chain of 2-3 calls).
+  const lastCall = aiCalls[aiCalls.length - 1] || null;
 
   return {
     results,
@@ -476,6 +492,9 @@ export async function recommendTrackCheat(request, provider) {
     superseded,
     stateVersion: session ? session.stateVersion : null,
     simulated: provider.kind !== "anthropic",
+    effortUsed: lastCall ? lastCall.effort : null,
+    retried: lastCall ? lastCall.retried : false,
+    retryReason: lastCall ? lastCall.retryReason : null,
     timingsMs,
     aiCalls
   };

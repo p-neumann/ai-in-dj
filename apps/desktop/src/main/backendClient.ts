@@ -163,6 +163,7 @@ export interface BackendTrackCheatRequest {
   sessionId?: string;
   clientSeq?: number;
   expectedStateVersion?: number;
+  debugOverride?: { effort?: string };
 }
 
 export interface BackendTrackCheatResult {
@@ -180,6 +181,10 @@ export interface BackendTrackCheatResult {
   mode?: string;
   stateVersion?: number | null;
   superseded?: boolean;
+  // docs/decisions/0017 - the effort testing control's own diagnostics.
+  effortUsed?: string | null;
+  retried?: boolean;
+  retryReason?: string | null;
 }
 
 export async function recommendTrackCheat(request: BackendTrackCheatRequest): Promise<BackendTrackCheatResult> {
@@ -223,6 +228,7 @@ export async function recommendTrackCheatWithAutoSync(
     sessionId?: string;
     clientSeq?: number;
     expectedStateVersion?: number;
+    debugOverride?: { effort?: string };
   }
 ): Promise<{ result: BackendTrackCheatResult; revision: number | null }> {
   let revision = cachedRevision;
@@ -262,6 +268,7 @@ export interface BackendCrateRequest {
   crateVibePrompt?: string;
   playCountMode: string;
   sessionId?: string;
+  debugOverride?: { effort?: string };
 }
 
 export interface BackendCrateResult {
@@ -274,6 +281,10 @@ export interface BackendCrateResult {
   shortfallReason?: string | null;
   knowledgeCallMade?: string | null;
   simulated?: boolean;
+  // docs/decisions/0017 - the effort testing control's own diagnostics.
+  effortUsed?: string | null;
+  retried?: boolean;
+  retryReason?: string | null;
   error?: string;
 }
 
@@ -306,7 +317,7 @@ export async function buildCrate(request: BackendCrateRequest): Promise<BackendC
 export async function buildCrateWithAutoSync(
   getTracks: () => SyncLibraryTrack[],
   cachedRevision: number | null,
-  params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string; sessionId?: string }
+  params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string; sessionId?: string; debugOverride?: { effort?: string } }
 ): Promise<{ result: BackendCrateResult; revision: number | null }> {
   let revision = cachedRevision;
 

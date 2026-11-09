@@ -19,7 +19,11 @@ export function createAnthropicProvider(apiKey) {
   }
   return {
     kind: "anthropic",
-    async call(requestBody) {
+    // docs/decisions/0017: `options.signal` lets a caller cancel an
+    // in-flight call (used by callWithEffortRetry.js's ~45s soft
+    // timeout). Purely additive - a caller that passes no options gets
+    // the exact same behavior as before.
+    async call(requestBody, options = {}) {
       let res;
       try {
         res = await fetch(ANTHROPIC_URL, {
@@ -29,9 +33,11 @@ export function createAnthropicProvider(apiKey) {
             "x-api-key": apiKey,
             "anthropic-version": ANTHROPIC_VERSION
           },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: options.signal
         });
       } catch (networkErr) {
+        if (networkErr.name === "AbortError") throw networkErr;
         throw new ProviderError("Network error calling Anthropic: " + networkErr.message, "PROVIDER_ERROR");
       }
       // CLAUDE.md Section 6.3's error codes distinguish RATE_LIMITED (429)

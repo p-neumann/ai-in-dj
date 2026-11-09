@@ -71,6 +71,10 @@ interface CcdjTrackCheatResult {
   mode?: string;
   stateVersion?: number | null;
   superseded?: boolean;
+  // docs/decisions/0017 - the effort testing control's own diagnostics.
+  effortUsed?: string | null;
+  retried?: boolean;
+  retryReason?: string | null;
 }
 
 interface CcdjSessionEventResult {
@@ -91,6 +95,10 @@ interface CcdjCrateResult {
   knowledgeCallMade?: string | null;
   simulated?: boolean;
   error?: string;
+  // docs/decisions/0017 - the effort testing control's own diagnostics.
+  effortUsed?: string | null;
+  retried?: boolean;
+  retryReason?: string | null;
 }
 
 interface Window {
@@ -122,8 +130,10 @@ interface Window {
         sessionId?: string;
         clientSeq?: number;
         expectedStateVersion?: number;
+        debugOverride?: { effort?: string };
       }) => Promise<CcdjTrackCheatResult>;
       buildCrate: (params: {
+        debugOverride?: { effort?: string };
         prompt: string;
         size: number;
         crateVibePrompt?: string;

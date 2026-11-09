@@ -164,6 +164,7 @@ export function registerBackendIpc(db: Database.Database): void {
         sessionId?: string;
         clientSeq?: number;
         expectedStateVersion?: number;
+        debugOverride?: { effort?: string };
       }
     ): Promise<BackendTrackCheatResult> => {
       const { result, revision } = await recommendTrackCheatWithAutoSync(
@@ -184,7 +185,7 @@ export function registerBackendIpc(db: Database.Database): void {
     "backend:buildCrate",
     async (
       _event,
-      params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string; sessionId?: string }
+      params: { prompt: string; size: number; crateVibePrompt?: string; playCountMode: string; sessionId?: string; debugOverride?: { effort?: string } }
     ): Promise<BackendCrateResult> => {
       const { result, revision } = await buildCrateWithAutoSync(
         () => getAllTracksForLibrary(db),

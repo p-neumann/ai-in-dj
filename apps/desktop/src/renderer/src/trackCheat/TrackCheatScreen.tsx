@@ -48,6 +48,11 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
   const [playCountMode, setPlayCountMode] = useState("mix");
   const [result, setResult] = useState<ResultState>({ status: "idle" });
   const [votes, setVotes] = useState<Record<number, "up" | "down">>({});
+  // docs/decisions/0017: a TESTING CONTROL, not a real setting - default
+  // stays "high" (Anthropic's own default), nothing about ranking/
+  // prompts/pool selection changes. Lets Ranjish compare high vs. low
+  // effort himself, in one session, before taking the question to Mike.
+  const [effort, setEffort] = useState<"high" | "low">("high");
 
   // Source of truth for the session is a ref, not state: a single click
   // can fire two sequential network calls (a seedDropped event, then
@@ -144,7 +149,8 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
         playCountMode,
         sessionId: session.sessionId,
         clientSeq: recommendSeq,
-        expectedStateVersion: session.stateVersion
+        expectedStateVersion: session.stateVersion,
+        debugOverride: { effort }
       });
       if (!data.ok) {
         setResult({ status: "error", message: data.error ?? "Unknown error" });
@@ -210,6 +216,15 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
           </>
         )}
       </p>
+
+      <label style={{ fontSize: 12, color: "#a15c00", display: "block", marginBottom: "0.5rem" }}>
+        <b>TESTING CONTROL</b> - effort (default stays high; this does not change ranking, prompts, or pool
+        selection):{" "}
+        <select value={effort} onChange={(e) => setEffort(e.target.value as "high" | "low")}>
+          <option value="high">high (default)</option>
+          <option value="low">low</option>
+        </select>
+      </label>
 
       <div>
         <label>
@@ -305,7 +320,14 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
             {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
             {result.data.candidatePoolSize ?? 0} &middot; fallback depth {result.data.fallbackDepth ?? 0} &middot;{" "}
             {result.data.simulated === false ? "REAL AI" : "simulated AI"} &middot; trigger {result.data.trigger ?? "n/a"}{" "}
-            &middot; mode {result.data.mode ?? "none"} &middot; chain depth {result.data.chain?.depth ?? 0}
+            &middot; mode {result.data.mode ?? "none"} &middot; chain depth {result.data.chain?.depth ?? 0} &middot; effort{" "}
+            {result.data.effortUsed ?? "n/a"}
+            {result.data.retried && (
+              <span style={{ color: "#a15c00" }}>
+                {" "}
+                &middot; retried automatically (reason: {result.data.retryReason}) - used reduced thinking
+              </span>
+            )}
           </p>
           {(result.data.results ?? []).length === 0 && <p>No matches.</p>}
           <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>

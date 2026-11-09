@@ -75,6 +75,10 @@ export interface TrackCheatResult {
   mode?: string;
   stateVersion?: number | null;
   superseded?: boolean;
+  // docs/decisions/0017 - the effort testing control's own diagnostics.
+  effortUsed?: string | null;
+  retried?: boolean;
+  retryReason?: string | null;
 }
 
 // Step 5, piece 4: one session event per DJ action (seedDropped, vote,
@@ -100,6 +104,10 @@ export interface CrateResult {
   knowledgeCallMade?: string | null;
   simulated?: boolean;
   error?: string;
+  // docs/decisions/0017 - the effort testing control's own diagnostics.
+  effortUsed?: string | null;
+  retried?: boolean;
+  retryReason?: string | null;
 }
 
 const api = {
@@ -135,12 +143,14 @@ const api = {
       sessionId?: string;
       clientSeq?: number;
       expectedStateVersion?: number;
+      debugOverride?: { effort?: string };
     }): Promise<TrackCheatResult> => ipcRenderer.invoke("backend:recommendTrackCheat", params),
     buildCrate: (params: {
       prompt: string;
       size: number;
       crateVibePrompt?: string;
       playCountMode: string;
+      debugOverride?: { effort?: string };
       sessionId?: string;
     }): Promise<CrateResult> => ipcRenderer.invoke("backend:buildCrate", params)
   }

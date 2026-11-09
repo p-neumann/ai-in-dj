@@ -43,6 +43,10 @@ export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProp
   const [crateVibePrompt, setCrateVibePrompt] = useState("");
   const [playCountMode, setPlayCountMode] = useState("mix");
   const [result, setResult] = useState<ResultState>({ status: "idle" });
+  // docs/decisions/0017: a TESTING CONTROL, not a real setting - default
+  // stays "high" (Anthropic's own default), nothing about ranking,
+  // prompts, or pool selection changes.
+  const [effort, setEffort] = useState<"high" | "low">("high");
 
   const isBusy = result.status === "loading";
 
@@ -59,7 +63,8 @@ export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProp
         size,
         crateVibePrompt: crateVibePrompt.trim() || undefined,
         playCountMode,
-        sessionId: sharedSession.sessionId
+        sessionId: sharedSession.sessionId,
+        debugOverride: { effort }
       });
       if (!data.ok) {
         setResult({ status: "error", message: data.error ?? "Unknown error" });
@@ -104,6 +109,14 @@ export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProp
           </select>
         </label>
 
+        <label style={{ color: "#a15c00" }}>
+          <b>TESTING CONTROL</b> - effort:{" "}
+          <select value={effort} onChange={(e) => setEffort(e.target.value as "high" | "low")}>
+            <option value="high">high (default)</option>
+            <option value="low">low</option>
+          </select>
+        </label>
+
         <label>
           Play-count mode:{" "}
           <select value={playCountMode} onChange={(e) => setPlayCountMode(e.target.value)}>
@@ -143,7 +156,14 @@ export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProp
               </>
             )}
             {result.data.knowledgeCallMade && <> &middot; knowledge call: {result.data.knowledgeCallMade}</>}
-            {" "}&middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"}
+            {" "}&middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"} &middot; effort{" "}
+            {result.data.effortUsed ?? "n/a"}
+            {result.data.retried && (
+              <span style={{ color: "#a15c00" }}>
+                {" "}
+                &middot; retried automatically (reason: {result.data.retryReason}) - used reduced thinking
+              </span>
+            )}
           </p>
           {(result.data.results ?? []).length === 0 && <p>No matches.</p>}
           <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>

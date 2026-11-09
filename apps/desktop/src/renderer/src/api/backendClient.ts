@@ -21,6 +21,7 @@ export function recommendTrackCheat(params: {
   sessionId?: string;
   clientSeq?: number;
   expectedStateVersion?: number;
+  debugOverride?: { effort?: string };
 }): Promise<CcdjTrackCheatResult> {
   return window.ccdj.backend.recommendTrackCheat(params);
 }
@@ -41,6 +42,7 @@ export function buildCrate(params: {
   crateVibePrompt?: string;
   playCountMode: string;
   sessionId?: string;
+  debugOverride?: { effort?: string };
 }): Promise<CcdjCrateResult> {
   return window.ccdj.backend.buildCrate(params);
 }
