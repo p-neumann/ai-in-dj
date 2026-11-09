@@ -46,3 +46,15 @@ export function buildCrate(params: {
 }): Promise<CcdjCrateResult> {
   return window.ccdj.backend.buildCrate(params);
 }
+
+// Step 5, piece 7 (Settings). Calls the already-built, already-tested
+// PUT /v1/preferences (Phase 4) - this file adds no new server logic,
+// just the first real caller.
+export function savePreferences(params: {
+  sessionId: string;
+  styleProfile: string;
+  doPlay: CcdjPrefsEntry[];
+  doNotPlay: CcdjPrefsEntry[];
+}): Promise<CcdjPreferencesResult> {
+  return window.ccdj.backend.savePreferences(params);
+}

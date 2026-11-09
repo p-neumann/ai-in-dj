@@ -342,3 +342,38 @@ export async function buildCrateWithAutoSync(
 
   return { result, revision };
 }
+
+// Step 5, piece 7 (Settings). CLAUDE.md Section 6.4's own documented
+// contract - PUT /v1/preferences - already exists server-side and
+// already makes one real Style Profile enrichment call when styleProfile
+// is non-empty (Phase 4, engine/knowledgeCalls.js). This is the first
+// time any desktop screen actually calls it; no new server-side work.
+export interface BackendPreferencesRequest {
+  sessionId: string;
+  styleProfile: string;
+  doPlay: Array<{ type: string; value: string; persistent: boolean }>;
+  doNotPlay: Array<{ type: string; value: string; persistent: boolean }>;
+}
+
+export interface BackendPreferencesResult {
+  ok: boolean;
+  enrichmentStatus?: string;
+  error?: string;
+}
+
+export async function savePreferences(request: BackendPreferencesRequest): Promise<BackendPreferencesResult> {
+  try {
+    const res = await fetch(`${backendUrl()}/v1/preferences`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify(request)
+    });
+    const body = (await res.json()) as { ok: boolean; data?: { enrichmentStatus?: string }; error?: { message?: string } };
+    if (!res.ok || !body.ok) {
+      return { ok: false, error: body.error?.message || `HTTP ${res.status}` };
+    }
+    return { ok: true, enrichmentStatus: body.data?.enrichmentStatus };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}

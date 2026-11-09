@@ -101,6 +101,18 @@ interface CcdjCrateResult {
   retryReason?: string | null;
 }
 
+interface CcdjPrefsEntry {
+  type: "artist" | "track" | "genre" | "era" | "content";
+  value: string;
+  persistent: boolean;
+}
+
+interface CcdjPreferencesResult {
+  ok: boolean;
+  enrichmentStatus?: string;
+  error?: string;
+}
+
 interface Window {
   ccdj: {
     library: {
@@ -140,6 +152,12 @@ interface Window {
         playCountMode: string;
         sessionId?: string;
       }) => Promise<CcdjCrateResult>;
+      savePreferences: (params: {
+        sessionId: string;
+        styleProfile: string;
+        doPlay: CcdjPrefsEntry[];
+        doNotPlay: CcdjPrefsEntry[];
+      }) => Promise<CcdjPreferencesResult>;
     };
   };
 }

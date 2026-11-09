@@ -15,8 +15,10 @@ import {
   sendSessionEvent,
   recommendTrackCheatWithAutoSync,
   buildCrateWithAutoSync,
+  savePreferences,
   type BackendTrackCheatResult,
   type BackendCrateResult,
+  type BackendPreferencesResult,
   type SessionEventResult
 } from "./backendClient.ts";
 
@@ -195,5 +197,20 @@ export function registerBackendIpc(db: Database.Database): void {
       cachedLibraryRevision = revision;
       return result;
     }
+  );
+
+  // Step 5, piece 7 (Settings). Calls the already-built, already-tested
+  // PUT /v1/preferences (Phase 4) - nothing new server-side.
+  ipcMain.handle(
+    "backend:savePreferences",
+    async (
+      _event,
+      params: {
+        sessionId: string;
+        styleProfile: string;
+        doPlay: Array<{ type: string; value: string; persistent: boolean }>;
+        doNotPlay: Array<{ type: string; value: string; persistent: boolean }>;
+      }
+    ): Promise<BackendPreferencesResult> => savePreferences(params)
   );
 }

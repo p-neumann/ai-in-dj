@@ -11,6 +11,7 @@ import LibraryScreen from "./library/LibraryScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
+import SettingsScreen from "./settings/SettingsScreen";
 
 // docs/decisions/0015: ONE session, created once here, shared by every
 // screen that talks to the backend - Track Cheat, Crate Cheat, and later
@@ -208,6 +209,7 @@ export default function App(): React.JSX.Element {
       <TrackCheatScreen sharedSession={sharedSession} />
       <CrateCheatScreen sharedSession={sharedSession} />
       <PlaylistCheatScreen />
+      <SettingsScreen sharedSession={sharedSession} />
 
       <PreferencesSection />
       <HistorySection />

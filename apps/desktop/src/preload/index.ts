@@ -110,6 +110,12 @@ export interface CrateResult {
   retryReason?: string | null;
 }
 
+export interface PreferencesResult {
+  ok: boolean;
+  enrichmentStatus?: string;
+  error?: string;
+}
+
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
@@ -152,7 +158,13 @@ const api = {
       playCountMode: string;
       debugOverride?: { effort?: string };
       sessionId?: string;
-    }): Promise<CrateResult> => ipcRenderer.invoke("backend:buildCrate", params)
+    }): Promise<CrateResult> => ipcRenderer.invoke("backend:buildCrate", params),
+    savePreferences: (params: {
+      sessionId: string;
+      styleProfile: string;
+      doPlay: Array<{ type: string; value: string; persistent: boolean }>;
+      doNotPlay: Array<{ type: string; value: string; persistent: boolean }>;
+    }): Promise<PreferencesResult> => ipcRenderer.invoke("backend:savePreferences", params)
   }
 };
 

@@ -241,3 +241,11 @@ Built the plain-text half of Playlist Cheat (parse, match against the real libra
 Ranjish's real-window check found a real bug: pasting an artist name with no title (copied straight from his own Library screen) returned "no match in your library," wrongly implying he didn't own a song he actually owns several versions of. Confirmed, including against Mike's own verbatim source run standalone, that this is an existing limitation in the real prototype (artist-only input was never supported), not something this port introduced. Fixed the wording only (`docs/decisions/0014`) - no matching logic changed. Checked again by Ranjish, passed. Committed `110684c`. Not pushed.
 
 **Backlog (noted, not started):** rewrite `docs/decisions/0006` through `0013` in the same plain-English style as `0014`, so the whole folder reads consistently for Mike and Paul, not just the newest entries.
+
+**Note for anyone picking this up later (2026-11-08):** Ranjish's own Anthropic API key expired on 2026-11-04. All the local, simulated-provider checks in this phase don't need it and keep working fine - but any real-AI check (`LIVE_AI_CALLS=true`) will fail with an authentication error until he generates a new key. If a real-AI check suddenly starts failing with an auth-shaped error, check this before assuming something in the code broke.
+
+## Step 5, piece 7 - Settings screen (in progress, real bug found 2026-11-08)
+
+Settings screen built (theme, Always On Top, Style Profile, Do Play/Do Not Play, History, Report a Problem) - see `docs/decisions/0016`. Ranjish's real-window check found a real bug: a session-only Do Not Play entry survived a full app restart, which CLAUDE.md's own Phase 5 goal line explicitly says should not happen. Root cause confirmed with real evidence (see `docs/decisions/0018` once written) before any fix - this port's own `persistLocal` function never filtered out session-only entries before writing to local storage, unlike Mike's real `persistPrefs`, which does. Same flaw affects both Do Play and Do Not Play. Not yet fixed - investigation reported to Ranjish, fix pending his approval.
+
+Settings screen remains uncommitted pending this fix and Ranjish's remaining checks (theme-after-restart, session-vs-permanent-after-restart, Always On Top, Report a Problem).

@@ -163,6 +163,19 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
         chainDepth: data.chain?.depth ?? session.chainDepth
       });
       setResult({ status: "done", data });
+
+      // Step 5, piece 7 (Settings): the first real history logging in
+      // the app - deliberately simplified (docs/QUESTIONS.md, "History
+      // panel: Phase 5 remaining work"). No per-result outcome, no
+      // chain/bridge/drift detail, no notes yet - just enough for the
+      // History panel to show and export something real.
+      const seedName = allTracks?.find((t) => t.id === trackId)?.displayName ?? `track ${trackId}`;
+      window.ccdj.history.append({
+        seedName,
+        trigger: origin === "ccdjResult" ? "daisyChain" : "freshSeed",
+        resultCount: data.results?.length ?? 0,
+        at: new Date().toISOString()
+      });
     } catch (error) {
       setResult({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
