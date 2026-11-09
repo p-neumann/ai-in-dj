@@ -1,7 +1,7 @@
 # 0006 - One database-wide schema version for the local SQLite database
 
 **Date:** 2026-10-13
-**Owner/source:** Hannah, this session (Phase 5 SQLite milestone). An engineering interpretation of CLAUDE.md §6.2, not a Mike decision; it does not touch musical behavior. Ranjish has not yet reviewed it.
+**Owner/source:** Hannah, this session (Phase 5 SQLite milestone). An engineering interpretation of CLAUDE.md §6.2, not a Mike decision; it does not touch musical behavior. Reviewed and approved by Ranjish (reported by Hannah, 2026-11-09).
 **Status:** Accepted
 
 ## Decision
