@@ -40,8 +40,12 @@ const versionOf = (path) => withDb(path, readSchemaVersion, { readonly: true });
 const tablesOf = (path) =>
   withDb(path, (db) => Object.keys(tableRowCounts(db)), { readonly: true });
 
-// A test-only v2 that adds a table, so upgrades can be exercised before the
-// app has a real second migration.
+// These tests exercise the runner, not the real tables, so they run on the
+// first migration only. Adding a table to MIGRATIONS must not change them;
+// the real list is tested in test/db-tables.test.mjs.
+const BASE = MIGRATIONS.slice(0, 1);
+
+// A test-only v2 that adds a table, so upgrades can be exercised.
 const addNotes = {
   version: 2,
   name: "test: add notes",
@@ -53,7 +57,7 @@ const addNotes = {
 // Builds a database at v1 holding three rows of data in a "sample" table.
 async function v1WithData(dir) {
   const dbPath = join(dir, "ccdj-db.sqlite");
-  const result = await migrate(dbPath, MIGRATIONS);
+  const result = await migrate(dbPath, BASE);
   assert.equal(result.status, "migrated");
   withDb(dbPath, (db) => {
     db.exec("CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT)");
@@ -68,7 +72,7 @@ async function v1WithData(dir) {
 test("a new database is created and migrated to the current version", async (t) => {
   const dbPath = join(tempDir(t), "ccdj-db.sqlite");
 
-  const result = await migrate(dbPath);
+  const result = await migrate(dbPath, BASE);
 
   assert.deepEqual(result, { status: "migrated", from: 0, to: 1, backupPath: null });
   assert.equal(versionOf(dbPath), 1);
@@ -79,11 +83,11 @@ test("a new database is created and migrated to the current version", async (t) 
 test("running again on a current database changes nothing", async (t) => {
   const dir = tempDir(t);
   const dbPath = join(dir, "ccdj-db.sqlite");
-  await migrate(dbPath);
+  await migrate(dbPath, BASE);
   const before = readFileSync(dbPath);
   const filesBefore = readdirSync(dir);
 
-  const result = await migrate(dbPath);
+  const result = await migrate(dbPath, BASE);
 
   assert.deepEqual(result, { status: "upToDate", version: 1 });
   assert.ok(readFileSync(dbPath).equals(before), "database file bytes changed");
@@ -94,7 +98,7 @@ test("an upgrade makes a verified backup of the old version first", async (t) =>
   const dir = tempDir(t);
   const dbPath = await v1WithData(dir);
 
-  const result = await migrate(dbPath, [...MIGRATIONS, addNotes]);
+  const result = await migrate(dbPath, [...BASE, addNotes]);
 
   const expectedBackup = join(dir, "ccdj-db.v1.bak");
   assert.deepEqual(result, { status: "migrated", from: 1, to: 2, backupPath: expectedBackup });
@@ -115,7 +119,7 @@ test("an upgrade makes a verified backup of the old version first", async (t) =>
 
 test("migrations on a WAL database run at synchronous = FULL", async (t) => {
   const dbPath = join(tempDir(t), "ccdj-db.sqlite");
-  await migrate(dbPath); // v1
+  await migrate(dbPath, BASE); // v1
   openDatabase(dbPath).close(); // journal mode is stored in the file: now WAL
 
   // A test-only migration that records the writing connection's settings.
@@ -134,7 +138,7 @@ test("migrations on a WAL database run at synchronous = FULL", async (t) => {
     }
   };
 
-  const result = await migrate(dbPath, [...MIGRATIONS, probe]);
+  const result = await migrate(dbPath, [...BASE, probe]);
 
   assert.equal(result.status, "migrated");
   // Without explicit settings this build would run WAL at NORMAL (1).
@@ -144,11 +148,11 @@ test("migrations on a WAL database run at synchronous = FULL", async (t) => {
 test("a database newer than this build is refused and not written", async (t) => {
   const dir = tempDir(t);
   const dbPath = join(dir, "ccdj-db.sqlite");
-  await migrate(dbPath, [...MIGRATIONS, addNotes]); // written by a "newer build"
+  await migrate(dbPath, [...BASE, addNotes]); // written by a "newer build"
   const before = readFileSync(dbPath);
   const filesBefore = readdirSync(dir);
 
-  const result = await migrate(dbPath, MIGRATIONS); // opened by an "older build"
+  const result = await migrate(dbPath, BASE); // opened by an "older build"
 
   assert.deepEqual(result, { status: "tooNew", version: 2, maxReadable: 1 });
   assert.ok(readFileSync(dbPath).equals(before), "database file bytes changed");
@@ -166,7 +170,7 @@ test("a failing migration leaves the database at its old version, data intact", 
     }
   };
 
-  const result = await migrate(dbPath, [...MIGRATIONS, addNotes, explode]);
+  const result = await migrate(dbPath, [...BASE, addNotes, explode]);
 
   assert.equal(result.status, "migrationFailed");
   assert.equal(result.version, 1);
@@ -201,7 +205,7 @@ test("a backup that fails blocks the migration", async (t) => {
   const dbPath = await v1WithData(dir);
   const before = readFileSync(dbPath);
 
-  const result = await migrate(dbPath, [...MIGRATIONS, addNotes], {
+  const result = await migrate(dbPath, [...BASE, addNotes], {
     backup: async () => {
       throw new Error("disk full");
     }

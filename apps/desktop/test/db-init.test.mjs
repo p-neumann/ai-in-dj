@@ -1,4 +1,4 @@
-// Phase 5 SQLite milestone: initDatabase(dir), the startup sequence's
+// Phase 5 SQLite milestone: initDatabase(dir, BASE), the startup sequence's
 // database step (docs/design-notes/startup-database-init.md sections 3, 4
 // and 6). Every test works in its own temporary folder under the OS temp
 // directory and deletes it afterwards — never the real user-data folder.
@@ -58,6 +58,10 @@ const versionOf = (path) => withDb(path, readSchemaVersion, { readonly: true });
 const tablesOf = (path) =>
   withDb(path, (db) => Object.keys(tableRowCounts(db)), { readonly: true });
 
+// As in test/db-migrate.test.mjs: these tests run on the first migration
+// only, so adding a table to MIGRATIONS does not change them.
+const BASE = MIGRATIONS.slice(0, 1);
+
 // Same test-only v2 as test/db-migrate.test.mjs.
 const addNotes = {
   version: 2,
@@ -73,7 +77,7 @@ test("a new nested folder is created and the database is ready at v1", async (t)
   const dir = join(tempDir(t), "database");
   const dbPath = join(dir, DB_FILE_NAME);
 
-  const result = await initDatabase(dir);
+  const result = await initDatabase(dir, BASE);
 
   useReady(result, () => {
     assert.equal(result.path, dbPath);
@@ -86,11 +90,11 @@ test("a new nested folder is created and the database is ready at v1", async (t)
 
 test("a second run finds the database up to date", async (t) => {
   const dir = tempDir(t);
-  useReady(await initDatabase(dir), () => {});
+  useReady(await initDatabase(dir, BASE), () => {});
 
   // The file is now in WAL mode, so this also covers migrate()'s read-only
   // open of a WAL database.
-  const result = await initDatabase(dir);
+  const result = await initDatabase(dir, BASE);
 
   useReady(result, () => {
     assert.deepEqual(result.migration, { status: "upToDate", version: 1 });
@@ -98,7 +102,7 @@ test("a second run finds the database up to date", async (t) => {
 });
 
 test("the returned connection has WAL, synchronous FULL, foreign keys and the busy timeout", async (t) => {
-  const result = await initDatabase(tempDir(t));
+  const result = await initDatabase(tempDir(t), BASE);
 
   useReady(result, (db) => {
     assert.equal(db.pragma("journal_mode", { simple: true }), "wal");
@@ -111,7 +115,7 @@ test("the returned connection has WAL, synchronous FULL, foreign keys and the bu
 test("an upgrade backs up rows that exist only in the -wal file", async (t) => {
   const dir = tempDir(t);
   const dbPath = join(dir, DB_FILE_NAME);
-  useReady(await initDatabase(dir), () => {}); // v1, WAL
+  useReady(await initDatabase(dir, BASE), () => {}); // v1, WAL
 
   // A second connection writes rows and stays open with automatic
   // checkpoints off, so the rows stay in -wal and out of the main file.
@@ -133,7 +137,7 @@ test("an upgrade backs up rows that exist only in the -wal file", async (t) => {
     copyFileSync(dbPath, copyPath);
     assert.ok(!tablesOf(copyPath).includes("sample"), "rows already reached the main file");
 
-    const result = await initDatabase(dir, [...MIGRATIONS, addNotes]);
+    const result = await initDatabase(dir, [...BASE, addNotes]);
 
     const backupPath = join(dir, "ccdj-db.v1.bak");
     useReady(result, (db) => {
@@ -168,11 +172,11 @@ test("an upgrade backs up rows that exist only in the -wal file", async (t) => {
 test("a database newer than this build is passed through as tooNew, unchanged", async (t) => {
   const dir = tempDir(t);
   const dbPath = join(dir, DB_FILE_NAME);
-  useReady(await initDatabase(dir, [...MIGRATIONS, addNotes]), () => {}); // a "newer build"
+  useReady(await initDatabase(dir, [...BASE, addNotes]), () => {}); // a "newer build"
   const before = readFileSync(dbPath);
   const filesBefore = readdirSync(dir);
 
-  const result = await initDatabase(dir, MIGRATIONS); // an "older build"
+  const result = await initDatabase(dir, BASE); // an "older build"
 
   // deepEqual also proves no connection (db) is returned.
   assert.deepEqual(result, {
@@ -195,7 +199,7 @@ test("a damaged file is an error at the migrate stage, left unchanged", async (t
   writeFileSync(dbPath, "this is not a sqlite database, just some bytes ".repeat(100));
   const before = readFileSync(dbPath);
 
-  const result = await initDatabase(dir);
+  const result = await initDatabase(dir, BASE);
 
   assert.equal(result.status, "error");
   assert.equal(result.stage, "migrate");

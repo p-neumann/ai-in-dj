@@ -32,5 +32,36 @@ export const MIGRATIONS: readonly Migration[] = [
         )
       `);
     }
+  },
+  {
+    // Table and functions adopted from Ranjish Kumar's ranjish/ccdj-desktop
+    // branch (his migration 1), so his screens can run on this database unchanged.
+    version: 2,
+    name: "create window_bounds",
+    up(db) {
+      db.exec(`
+        CREATE TABLE window_bounds (
+          id     INTEGER PRIMARY KEY CHECK (id = 1),
+          x      INTEGER,
+          y      INTEGER,
+          width  INTEGER NOT NULL,
+          height INTEGER NOT NULL
+        )
+      `);
+    }
+  },
+  {
+    // Adopted from Ranjish Kumar's branch (his migration 1). Permanent
+    // preferences only; session-only entries never reach this table.
+    version: 3,
+    name: "create preferences",
+    up(db) {
+      db.exec(`
+        CREATE TABLE preferences (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+    }
   }
 ];
