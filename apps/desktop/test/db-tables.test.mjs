@@ -1,5 +1,5 @@
 // Phase 5 SQLite milestone: the real migration list and the tables it creates
-// (window_bounds, preferences, history). Every test works in its own temporary folder
+// (window_bounds, preferences, history, tracks). Every test works in its own temporary folder
 // under the OS temp directory and deletes it afterwards — never the real
 // user-data folder.
 
@@ -16,6 +16,13 @@ import { readSchemaVersion, userTableNames } from "../src/main/db/schema.ts";
 import { getWindowBounds, saveWindowBounds } from "../src/main/db/windowBounds.ts";
 import { getPreference, setPreference } from "../src/main/db/preferences.ts";
 import { appendHistoryEntry, listHistory, updateHistoryEntry } from "../src/main/db/history.ts";
+import { trackId } from "../src/main/db/trackId.ts";
+import {
+  countTracks,
+  getAllTracksForLibrary,
+  getTrackLocation,
+  replaceAllTracks
+} from "../src/main/db/tracks.ts";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -64,7 +71,7 @@ test("a new database reaches the latest version with every table", async (t) => 
     dbPath,
     (db) => {
       assert.equal(readSchemaVersion(db), LATEST);
-      for (const table of ["schema_migrations", "window_bounds", "preferences", "history"]) {
+      for (const table of ["schema_migrations", "window_bounds", "preferences", "history", "tracks"]) {
         assert.ok(userTableNames(db).includes(table), `missing table ${table}`);
       }
     },
@@ -183,6 +190,98 @@ test("history: updating an unknown id returns false and changes nothing", async 
   assert.equal(updateHistoryEntry(db, "missing", entry("missing", "Other")), false);
 
   assert.deepEqual(listHistory(db, 10).map((r) => r.entry), [entry("e1", "Seed One")]);
+});
+
+// --- tracks ----------------------------------------------------------------
+
+function track(location, overrides = {}) {
+  return {
+    displayName: location.split("/").pop().replace(/\.[^.]+$/, ""),
+    artist: "Rihanna",
+    title: "So Hard",
+    bpm: 88,
+    key: "8A",
+    genre: "R&B",
+    year: 2007,
+    playcount: 3,
+    durationSec: 244,
+    location,
+    extra: {},
+    ...overrides
+  };
+}
+
+test("trackId: same file, same ID; different files, different IDs", () => {
+  const id = trackId("/Volumes/DJ/Music/So Hard (Clean).mp4");
+
+  assert.match(id, /^t_[0-9a-f]{16}$/);
+  assert.equal(trackId("/Volumes/DJ/Music/So Hard (Clean).mp4"), id);
+  // Separators, letter case and surrounding spaces do not change it.
+  assert.equal(trackId("\\Volumes\\DJ\\Music\\So Hard (Clean).mp4"), id);
+  assert.equal(trackId("  /volumes/dj/music/so hard (CLEAN).MP4 "), id);
+  // Composed "é" and decomposed "e" + accent are the same name.
+  assert.equal(trackId("/Music/Beyoncé.mp3"), trackId("/Music/Beyoncé.mp3"));
+  assert.notEqual(trackId("/Volumes/DJ/Music/So Hard (Dirty).mp4"), id);
+});
+
+test("tracks: a re-import keeps every track's ID", async (t) => {
+  const db = await freshDb(t);
+  const library = [track("/Volumes/DJ/a.mp4"), track("/Volumes/DJ/b.mp4"), track("/Volumes/DJ/c.mp4")];
+
+  replaceAllTracks(db, library);
+  const first = getAllTracksForLibrary(db).map((r) => r.id).sort();
+  // Re-import in a different order, with one track's metadata changed.
+  replaceAllTracks(db, [library[2], { ...library[0], playcount: 9 }, library[1]]);
+  const second = getAllTracksForLibrary(db).map((r) => r.id).sort();
+
+  assert.deepEqual(second, first);
+  assert.deepEqual(first, library.map((tr) => trackId(tr.location)).sort());
+  assert.equal(countTracks(db), 3);
+});
+
+test("tracks: location is found by ID, and an unknown ID gives null", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4")]);
+
+  assert.equal(getTrackLocation(db, trackId("/Volumes/DJ/a.mp4")), "/Volumes/DJ/a.mp4");
+  assert.equal(getTrackLocation(db, "t_0000000000000000"), null);
+});
+
+test("tracks: unknown bpm and year read back as null; a real 0 play count stays 0", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4", { bpm: null, year: null, playcount: 0 })]);
+
+  const [row] = getAllTracksForLibrary(db);
+
+  assert.equal(row.bpm, null);
+  assert.equal(row.year, null);
+  assert.equal(row.playcount, 0);
+});
+
+test("tracks: the library rows carry no file path", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4")]);
+
+  const [row] = getAllTracksForLibrary(db);
+
+  assert.deepEqual(Object.keys(row).sort(), [
+    "artist", "bpm", "displayName", "genre", "id", "key", "playcount", "title", "year"
+  ]);
+});
+
+test("tracks: a repeated location keeps the first row and is reported, not a crash", async (t) => {
+  const db = await freshDb(t);
+
+  const result = replaceAllTracks(db, [
+    track("/Volumes/DJ/a.mp4", { title: "first" }),
+    track("/Volumes/DJ/b.mp4"),
+    track("\\Volumes\\DJ\\A.mp4", { title: "repeat" })
+  ]);
+
+  assert.deepEqual(result, { inserted: 2, duplicateLocations: ["\\Volumes\\DJ\\A.mp4"] });
+  assert.equal(countTracks(db), 2);
+  const a = getAllTracksForLibrary(db).find((r) => r.id === trackId("/Volumes/DJ/a.mp4"));
+  assert.equal(a.title, "first");
 });
 
 test("history: entries without an id can still be saved", async (t) => {

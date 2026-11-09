@@ -80,5 +80,31 @@ export const MIGRATIONS: readonly Migration[] = [
         )
       `);
     }
+  },
+  {
+    // Columns adopted from Ranjish Kumar's branch (his migration 2), with
+    // two changes: id is the stable trackId (docs/decisions/0008), not an
+    // auto-number, and bpm/year may be NULL for unknown instead of 0
+    // (CLAUDE.md 6.1). location stays on this computer only (CLAUDE.md 5.4).
+    version: 5,
+    name: "create tracks",
+    up(db) {
+      db.exec(`
+        CREATE TABLE tracks (
+          id          TEXT PRIMARY KEY,
+          displayName TEXT NOT NULL,
+          artist      TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          bpm         REAL,
+          key         TEXT NOT NULL,
+          genre       TEXT NOT NULL,
+          year        INTEGER,
+          playcount   INTEGER,
+          durationSec INTEGER,
+          location    TEXT NOT NULL,
+          extra       TEXT NOT NULL
+        )
+      `);
+    }
   }
 ];
