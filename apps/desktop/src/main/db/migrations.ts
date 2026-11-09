@@ -63,5 +63,22 @@ export const MIGRATIONS: readonly Migration[] = [
         )
       `);
     }
+  },
+  {
+    // Adopted from Ranjish Kumar's branch (his migration 3). entry_id holds
+    // the entry's own "id" (CLAUDE.md 6.5) so an entry can be updated later,
+    // when a result is dragged or voted on, or a note is added.
+    version: 4,
+    name: "create history",
+    up(db) {
+      db.exec(`
+        CREATE TABLE history (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp INTEGER NOT NULL,
+          entry     TEXT NOT NULL,
+          entry_id  TEXT UNIQUE
+        )
+      `);
+    }
   }
 ];

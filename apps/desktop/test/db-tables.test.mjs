@@ -1,5 +1,5 @@
 // Phase 5 SQLite milestone: the real migration list and the tables it creates
-// (window_bounds, preferences). Every test works in its own temporary folder
+// (window_bounds, preferences, history). Every test works in its own temporary folder
 // under the OS temp directory and deletes it afterwards — never the real
 // user-data folder.
 
@@ -15,6 +15,7 @@ import { openDatabase } from "../src/main/db/connection.ts";
 import { readSchemaVersion, userTableNames } from "../src/main/db/schema.ts";
 import { getWindowBounds, saveWindowBounds } from "../src/main/db/windowBounds.ts";
 import { getPreference, setPreference } from "../src/main/db/preferences.ts";
+import { appendHistoryEntry, listHistory, updateHistoryEntry } from "../src/main/db/history.ts";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -63,7 +64,7 @@ test("a new database reaches the latest version with every table", async (t) => 
     dbPath,
     (db) => {
       assert.equal(readSchemaVersion(db), LATEST);
-      for (const table of ["schema_migrations", "window_bounds", "preferences"]) {
+      for (const table of ["schema_migrations", "window_bounds", "preferences", "history"]) {
         assert.ok(userTableNames(db).includes(table), `missing table ${table}`);
       }
     },
@@ -129,4 +130,68 @@ test("preferences: set then get round-trips, and setting again overwrites", asyn
   setPreference(db, "styleProfile", "Extended mixes first");
   assert.equal(getPreference(db, "styleProfile"), "Extended mixes first");
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM preferences").get().n, 2);
+});
+
+// --- history ---------------------------------------------------------------
+
+// A cut-down entry in the CLAUDE.md 6.5 shape.
+function entry(id, seedName, outcome = "shown") {
+  return {
+    id,
+    ts: 1,
+    sessionId: "s_1",
+    seed: { name: seedName, bpm: "", key: "", genre: "", year: "" },
+    trigger: "freshSeed",
+    resultStatus: "ok",
+    results: [{ name: "Rihanna - So Hard (Clean)", bpm: "88", key: "8A", genre: "R&B", year: "2007", outcome }]
+  };
+}
+
+test("history: append then list round-trips the exact entry, newest first, within the limit", async (t) => {
+  const db = await freshDb(t);
+  appendHistoryEntry(db, entry("e1", "Seed One"));
+  appendHistoryEntry(db, entry("e2", "Seed Two"));
+  appendHistoryEntry(db, entry("e3", "Seed Three"));
+
+  const rows = listHistory(db, 2);
+
+  assert.deepEqual(
+    rows.map((r) => r.entry),
+    [entry("e3", "Seed Three"), entry("e2", "Seed Two")]
+  );
+  assert.ok(rows.every((r) => Number.isInteger(r.id) && r.timestamp > 0));
+});
+
+test("history: update replaces only the entry with that id", async (t) => {
+  const db = await freshDb(t);
+  appendHistoryEntry(db, entry("e1", "Seed One"));
+  appendHistoryEntry(db, entry("e2", "Seed Two"));
+
+  const dragged = { ...entry("e1", "Seed One", "dragged"), note: "packed the floor" };
+  assert.equal(updateHistoryEntry(db, "e1", dragged), true);
+
+  assert.deepEqual(
+    listHistory(db, 10).map((r) => r.entry),
+    [entry("e2", "Seed Two"), dragged]
+  );
+});
+
+test("history: updating an unknown id returns false and changes nothing", async (t) => {
+  const db = await freshDb(t);
+  appendHistoryEntry(db, entry("e1", "Seed One"));
+
+  assert.equal(updateHistoryEntry(db, "missing", entry("missing", "Other")), false);
+
+  assert.deepEqual(listHistory(db, 10).map((r) => r.entry), [entry("e1", "Seed One")]);
+});
+
+test("history: entries without an id can still be saved", async (t) => {
+  const db = await freshDb(t);
+  appendHistoryEntry(db, { note: "no id" });
+  appendHistoryEntry(db, { note: "no id either" });
+
+  assert.deepEqual(
+    listHistory(db, 10).map((r) => r.entry),
+    [{ note: "no id either" }, { note: "no id" }]
+  );
 });
