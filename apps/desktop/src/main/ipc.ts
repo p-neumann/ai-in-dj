@@ -122,11 +122,11 @@ export function registerHistoryIpc(db: Database.Database): void {
 }
 
 // Step 4 - showInFinder (R18, keeps the prototype's own name). The
-// renderer only ever says "show me track #N" - the real path lookup
+// renderer only ever names a trackId - the real path lookup
 // happens here, on the trusted side; a raw path from the renderer is
 // never accepted.
 export function registerFileIpc(db: Database.Database): void {
-  ipcMain.handle("files:showInFinder", (_event, trackId: number) => {
+  ipcMain.handle("files:showInFinder", (_event, trackId: string) => {
     const location = getTrackLocation(db, trackId);
     if (!location) return { ok: false as const, reason: "unknown trackId" };
     try {
@@ -200,7 +200,7 @@ export function registerExportIpc(db: Database.Database): void {
     "files:exportCrateTracks",
     async (
       event: Electron.IpcMainInvokeEvent,
-      params: { format: ExportFormat; trackIds: number[]; prompt: string }
+      params: { format: ExportFormat; trackIds: string[]; prompt: string }
     ): Promise<{ cancelled: boolean; filePath?: string }> => {
       const rows = getTracksByIds(db, params.trackIds);
       const byId = new Map(rows.map((r) => [r.id, r]));
@@ -212,7 +212,7 @@ export function registerExportIpc(db: Database.Database): void {
       for (const id of params.trackIds) {
         const row = byId.get(id);
         if (!row) continue;
-        tracks.push({ name: row.displayName, artist: row.artist, bpm: row.bpm, key: row.key, location: row.location });
+        tracks.push({ name: row.displayName, artist: row.artist, bpm: row.bpm ?? "", key: row.key, location: row.location });
       }
       const jsonTracks: ExportJsonTrack[] = tracks.map((t) => ({ name: t.name, artist: t.artist, bpm: t.bpm, key: t.key }));
       const content = buildExportContent(params.format, tracks, jsonTracks, { prompt: params.prompt.slice(0, 200) });
@@ -277,7 +277,7 @@ export function registerBackendIpc(db: Database.Database): void {
     async (
       _event,
       params: {
-        seedTrackId: number;
+        seedTrackId: string;
         vibe: number;
         energy: number;
         playCountMode: string;

@@ -14,7 +14,7 @@ export function createBackendSession(): Promise<CcdjBackendSessionResult> {
 }
 
 export function recommendTrackCheat(params: {
-  seedTrackId: number;
+  seedTrackId: string;
   vibe: number;
   energy: number;
   playCountMode: string;

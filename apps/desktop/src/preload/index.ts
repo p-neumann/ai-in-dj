@@ -7,7 +7,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 export interface SampleTrack {
-  id: number;
+  id: string;
   displayName: string;
 }
 
@@ -50,20 +50,20 @@ export interface BackendSessionResult {
 }
 
 export interface LibraryRow {
-  id: number;
+  id: string;
   displayName: string;
   artist: string;
   title: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   genre: string;
-  year: number;
+  year: number | null;
   playcount: number | null;
 }
 
 export interface TrackCheatResult {
   ok: boolean;
-  results?: Array<{ trackId: number; name: string; bpm: number; key: string; camp: string | null; lane: string | null }>;
+  results?: Array<{ trackId: string; name: string; bpm: number | null; key: string; camp: string | null; lane: string | null }>;
   candidatePoolSize?: number;
   requested?: number;
   returned?: number;
@@ -96,7 +96,7 @@ export interface SessionEventResult {
 // Step 5, piece 5 (Crate Cheat).
 export interface CrateResult {
   ok: boolean;
-  results?: Array<{ trackId: number; name: string; bpm: number; key: string }>;
+  results?: Array<{ trackId: string; name: string; bpm: number | null; key: string }>;
   requested?: number;
   returned?: number;
   candidatePoolSize?: number;
@@ -157,7 +157,7 @@ const api = {
     list: (limit: number): Promise<HistoryRow[]> => ipcRenderer.invoke("history:list", limit)
   },
   // R18 - keeps the prototype's own function names.
-  showInFinder: (trackId: number): Promise<ShowInFinderResult> =>
+  showInFinder: (trackId: string): Promise<ShowInFinderResult> =>
     ipcRenderer.invoke("files:showInFinder", trackId),
   setAlwaysOnTop: (flag: boolean): Promise<boolean> => ipcRenderer.invoke("window:setAlwaysOnTop", flag),
   // Step 5, piece 1 - the pipe to the real backend. The renderer never
@@ -168,7 +168,7 @@ const api = {
     sendSessionEvent: (sessionId: string, event: Record<string, unknown>): Promise<SessionEventResult> =>
       ipcRenderer.invoke("backend:sendSessionEvent", sessionId, event),
     recommendTrackCheat: (params: {
-      seedTrackId: number;
+      seedTrackId: string;
       vibe: number;
       energy: number;
       playCountMode: string;
@@ -199,7 +199,7 @@ const api = {
   // track objects straight through, with no location ever (a real
   // asymmetry in the source, not something invented here).
   export: {
-    exportCrateTracks: (params: { format: ExportFormat; trackIds: number[]; prompt: string }): Promise<ExportResult> =>
+    exportCrateTracks: (params: { format: ExportFormat; trackIds: string[]; prompt: string }): Promise<ExportResult> =>
       ipcRenderer.invoke("files:exportCrateTracks", params),
     exportPlaylistTracks: (params: {
       format: ExportFormat;

@@ -3,7 +3,7 @@
 // renderer doesn't need a cross-project type import to know this shape.
 
 interface CcdjSampleTrack {
-  id: number;
+  id: string;
   displayName: string;
 }
 
@@ -46,20 +46,20 @@ interface CcdjBackendSessionResult {
 }
 
 interface CcdjLibraryRow {
-  id: number;
+  id: string;
   displayName: string;
   artist: string;
   title: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   genre: string;
-  year: number;
+  year: number | null;
   playcount: number | null;
 }
 
 interface CcdjTrackCheatResult {
   ok: boolean;
-  results?: Array<{ trackId: number; name: string; bpm: number; key: string; camp: string | null; lane: string | null }>;
+  results?: Array<{ trackId: string; name: string; bpm: number | null; key: string; camp: string | null; lane: string | null }>;
   candidatePoolSize?: number;
   requested?: number;
   returned?: number;
@@ -87,7 +87,7 @@ interface CcdjSessionEventResult {
 
 interface CcdjCrateResult {
   ok: boolean;
-  results?: Array<{ trackId: number; name: string; bpm: number; key: string }>;
+  results?: Array<{ trackId: string; name: string; bpm: number | null; key: string }>;
   requested?: number;
   returned?: number;
   candidatePoolSize?: number;
@@ -154,14 +154,14 @@ interface Window {
       append: (entry: unknown) => Promise<boolean>;
       list: (limit: number) => Promise<CcdjHistoryRow[]>;
     };
-    showInFinder: (trackId: number) => Promise<CcdjShowInFinderResult>;
+    showInFinder: (trackId: string) => Promise<CcdjShowInFinderResult>;
     setAlwaysOnTop: (flag: boolean) => Promise<boolean>;
     backend: {
       checkHealth: () => Promise<CcdjBackendHealthResult>;
       createSession: () => Promise<CcdjBackendSessionResult>;
       sendSessionEvent: (sessionId: string, event: Record<string, unknown>) => Promise<CcdjSessionEventResult>;
       recommendTrackCheat: (params: {
-        seedTrackId: number;
+        seedTrackId: string;
         vibe: number;
         energy: number;
         playCountMode: string;
@@ -188,7 +188,7 @@ interface Window {
     export: {
       exportCrateTracks: (params: {
         format: CcdjExportFormat;
-        trackIds: number[];
+        trackIds: string[];
         prompt: string;
       }) => Promise<CcdjExportResult>;
       exportPlaylistTracks: (params: {

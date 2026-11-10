@@ -34,9 +34,9 @@ export interface SharedSession {
 // both Crate Cheat and Playlist Cheat need to see and change the same
 // list, not two separate copies.
 export interface CrateTrack {
-  trackId: number;
+  trackId: string;
   name: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
 }
 
@@ -235,11 +235,11 @@ export default function App(): React.JSX.Element {
 }
 
 function SampleTrackList({ tracks }: { tracks: CcdjSampleTrack[] }): React.JSX.Element | null {
-  const [revealResult, setRevealResult] = useState<Record<number, string>>({});
+  const [revealResult, setRevealResult] = useState<Record<string, string>>({});
 
   if (tracks.length === 0) return null;
 
-  async function handleReveal(id: number): Promise<void> {
+  async function handleReveal(id: string): Promise<void> {
     const result = await window.ccdj.showInFinder(id);
     setRevealResult((prev) => ({
       ...prev,

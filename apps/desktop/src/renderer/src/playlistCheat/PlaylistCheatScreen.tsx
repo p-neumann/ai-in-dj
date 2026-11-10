@@ -218,7 +218,7 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
                             checked={selected[ri] === mi}
                             onChange={() => setSelected((prev) => ({ ...prev, [ri]: mi }))}
                           />{" "}
-                          {m.displayName} - {m.bpm} bpm / {m.key}
+                          {m.displayName} - {m.bpm ?? "-"} bpm / {m.key}
                         </label>
                       </li>
                     ))}

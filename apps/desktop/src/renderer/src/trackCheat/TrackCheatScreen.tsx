@@ -42,12 +42,12 @@ interface TrackCheatScreenProps {
 export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProps): React.JSX.Element {
   const [allTracks, setAllTracks] = useState<CcdjLibraryRow[] | null>(null);
   const [seedSearch, setSeedSearch] = useState("");
-  const [seedTrackId, setSeedTrackId] = useState<number | null>(null);
+  const [seedTrackId, setSeedTrackId] = useState<string | null>(null);
   const [vibe, setVibe] = useState(0);
   const [energy, setEnergy] = useState(0);
   const [playCountMode, setPlayCountMode] = useState("mix");
   const [result, setResult] = useState<ResultState>({ status: "idle" });
-  const [votes, setVotes] = useState<Record<number, "up" | "down">>({});
+  const [votes, setVotes] = useState<Record<string, "up" | "down">>({});
   // docs/decisions/0017: a TESTING CONTROL, not a real setting - default
   // stays "high" (Anthropic's own default), nothing about ranking/
   // prompts/pool selection changes. Lets Ranjish compare high vs. low
@@ -105,7 +105,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
   // re-comparing it to "loading" there is a type error, not just redundant.
   const isBusy = result.status === "loading";
 
-  function setSeedTo(trackId: number): void {
+  function setSeedTo(trackId: string): void {
     setSeedTrackId(trackId);
     const match = allTracks?.find((t) => t.id === trackId);
     setSeedSearch(match ? match.displayName : "");
@@ -116,7 +116,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
   // what just happened, THEN ask for recommendations using the server's
   // updated session state (CLAUDE.md 4.1 - these are genuinely different
   // events, not the same action with a different label).
-  async function recommendForSeed(trackId: number, origin: "external" | "ccdjResult"): Promise<void> {
+  async function recommendForSeed(trackId: string, origin: "external" | "ccdjResult"): Promise<void> {
     // docs/decisions/0015: no longer creates a fallback session of its
     // own here - doing that was exactly the bug being fixed (a second,
     // divergent session Crate Cheat would never see). If the app's one
@@ -186,7 +186,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
     await recommendForSeed(seedTrackId, "external");
   }
 
-  async function handleDaisyChain(trackId: number): Promise<void> {
+  async function handleDaisyChain(trackId: string): Promise<void> {
     setSeedTo(trackId);
     await recommendForSeed(trackId, "ccdjResult");
   }
@@ -196,7 +196,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
   // session, on any path - not just hidden in this screen. Clicking the
   // same vote again clears it (sends value: null, same as the source's
   // own un-vote behavior).
-  async function handleVote(trackId: number, value: "up" | "down"): Promise<void> {
+  async function handleVote(trackId: string, value: "up" | "down"): Promise<void> {
     const session = sessionRef.current;
     if (!session) return;
     const nextValue = votes[trackId] === value ? null : value;
@@ -346,7 +346,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
           <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>
             {(result.data.results ?? []).map((r) => (
               <li key={r.trackId} style={{ marginBottom: "0.3rem" }}>
-                {r.name} - {r.bpm} bpm / {r.key}
+                {r.name} - {r.bpm ?? "-"} bpm / {r.key}
                 {r.lane && <span style={{ marginLeft: 6, fontSize: 11, color: "#888" }}>[{r.lane}]</span>}
                 {r.camp && <span style={{ marginLeft: 6, fontSize: 11, color: "#888" }}>camp:{r.camp}</span>}
                 <button

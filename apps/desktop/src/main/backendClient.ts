@@ -68,14 +68,14 @@ export async function createBackendSession(): Promise<CreateSessionResult> {
 // own limit was never raised. CLAUDE.md 5.4 privacy rule: these fields
 // only - no location, no path, ever.
 export interface SyncLibraryTrack {
-  id: number;
+  id: string;
   displayName: string;
   artist: string;
   title: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   genre: string;
-  year: number;
+  year: number | null;
   playcount: number | null;
 }
 
@@ -156,7 +156,7 @@ export async function sendSessionEvent(
 // this request supplies directly.
 export interface BackendTrackCheatRequest {
   libraryRevision: number;
-  seedTrackId: number;
+  seedTrackId: string;
   vibe: number;
   energy: number;
   playCountMode: string;
@@ -169,7 +169,7 @@ export interface BackendTrackCheatRequest {
 export interface BackendTrackCheatResult {
   ok: boolean;
   errorCode?: string;
-  results?: Array<{ trackId: number; name: string; bpm: number; key: string; camp: string | null; lane: string | null }>;
+  results?: Array<{ trackId: string; name: string; bpm: number | null; key: string; camp: string | null; lane: string | null }>;
   candidatePoolSize?: number;
   requested?: number;
   returned?: number;
@@ -221,7 +221,7 @@ export async function recommendTrackCheatWithAutoSync(
   getTracks: () => SyncLibraryTrack[],
   cachedRevision: number | null,
   params: {
-    seedTrackId: number;
+    seedTrackId: string;
     vibe: number;
     energy: number;
     playCountMode: string;
@@ -274,7 +274,7 @@ export interface BackendCrateRequest {
 export interface BackendCrateResult {
   ok: boolean;
   errorCode?: string;
-  results?: Array<{ trackId: number; name: string; bpm: number; key: string }>;
+  results?: Array<{ trackId: string; name: string; bpm: number | null; key: string }>;
   requested?: number;
   returned?: number;
   candidatePoolSize?: number;

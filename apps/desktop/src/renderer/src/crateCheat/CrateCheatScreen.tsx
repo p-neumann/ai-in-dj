@@ -273,7 +273,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
           <li key={i}>
             <label>
               <input type="checkbox" checked={!!selected[i]} onChange={() => setSelected((prev) => ({ ...prev, [i]: !prev[i] }))} />{" "}
-              {t.name} - {t.bpm} bpm / {t.key}
+              {t.name} - {t.bpm ?? "-"} bpm / {t.key}
             </label>
           </li>
         ))}

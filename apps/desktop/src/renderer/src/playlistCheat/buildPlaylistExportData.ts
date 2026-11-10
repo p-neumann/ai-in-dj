@@ -66,9 +66,9 @@ export function buildPlaylistExportData(results: MatchedResult[], selected: Reco
 
     r.matches.forEach((m, mi) => {
       if (selected[ri] === mi) {
-        tracks.push({ name: m.displayName, artist: m.artist, bpm: m.bpm, key: m.key });
+        tracks.push({ name: m.displayName, artist: m.artist, bpm: m.bpm ?? "", key: m.key });
       }
-      allTracksForJson.push({ name: m.displayName, artist: m.artist, bpm: m.bpm, key: m.key, isMatch: true });
+      allTracksForJson.push({ name: m.displayName, artist: m.artist, bpm: m.bpm ?? "", key: m.key, isMatch: true });
     });
   });
 
