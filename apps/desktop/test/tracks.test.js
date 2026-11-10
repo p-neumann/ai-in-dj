@@ -13,7 +13,9 @@ const {
   getSampleTracks,
   getTrackLocation,
   getAllTracksForLibrary,
-  getTracksByIds
+  getTracksByIds,
+  getTracksForDuplicateScan,
+  deleteTracksByIds
 } = require("../src/main/db/tracks.ts");
 
 function sampleTrack(n) {
@@ -105,6 +107,43 @@ test("getTracksByIds: an empty id list returns an empty list without touching th
   const db = new Database(":memory:");
   runMigrations(db);
   assert.deepEqual(getTracksByIds(db, []), []);
+  db.close();
+});
+
+// Step 5, piece 9 (Duplicate Finder) - its scan needs duration and
+// location, which getAllTracksForLibrary deliberately leaves out.
+test("getTracksForDuplicateScan: includes durationSec and location, unlike getAllTracksForLibrary", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1)]);
+
+  const [row] = getTracksForDuplicateScan(db);
+  assert.equal(row.durationSec, 200);
+  assert.equal(row.location, "/Music/Song 1.mp3");
+  db.close();
+});
+
+// Step 5, piece 9 (Duplicate Finder) - the deliberate "Apply
+// Permanently" path only. Everyday "Send to Recycle Bin" never calls
+// this at all (it's session-only, in the renderer).
+test("deleteTracksByIds: removes exactly the given ids, real rows, a real count back", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1), sampleTrack(2), sampleTrack(3)]);
+  const [t1, , t3] = getSampleTracks(db, 10);
+
+  const deleted = deleteTracksByIds(db, [t1.id, t3.id, 999999]);
+  assert.equal(deleted, 2, "the unknown id must not be counted or error, just have nothing to delete");
+  assert.equal(countTracks(db), 1);
+  db.close();
+});
+
+test("deleteTracksByIds: an empty id list deletes nothing and doesn't touch the database", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1)]);
+  assert.equal(deleteTracksByIds(db, []), 0);
+  assert.equal(countTracks(db), 1);
   db.close();
 });
 

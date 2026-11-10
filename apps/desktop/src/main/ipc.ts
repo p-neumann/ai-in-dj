@@ -12,7 +12,9 @@ import {
   getSampleTracks,
   getTrackLocation,
   getAllTracksForLibrary,
-  getTracksByIds
+  getTracksByIds,
+  getTracksForDuplicateScan,
+  deleteTracksByIds
 } from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
 import { appendHistoryEntry, listHistory } from "./db/history.ts";
@@ -100,6 +102,20 @@ export function registerLibraryIpc(db: Database.Database): void {
   // the renderer searches/filters in its own memory from there (see
   // db/tracks.ts's getAllTracksForLibrary for the measured reasoning).
   ipcMain.handle("library:getAllTracks", () => getAllTracksForLibrary(db));
+
+  // Step 5, piece 9 (Duplicate Finder).
+  ipcMain.handle("library:getTracksForDuplicateScan", () => getTracksForDuplicateScan(db));
+
+  // The deliberate "Apply Permanently" action only - everyday "Send to
+  // Recycle Bin" never reaches main at all (session-only, renderer
+  // state). A real row delete, so the same staleness rule as a fresh
+  // import applies: the backend's cached revision now describes a
+  // library that no longer exists.
+  ipcMain.handle("library:permanentlyDeleteTracks", (_event, trackIds: number[]) => {
+    const deleted = deleteTracksByIds(db, trackIds);
+    if (deleted > 0) cachedLibraryRevision = null;
+    return { deleted };
+  });
 }
 
 // Step 4 - preferences: a permanent setting survives a restart.

@@ -61,6 +61,21 @@ export interface LibraryRow {
   playcount: number | null;
 }
 
+// Step 5, piece 9 (Duplicate Finder).
+export interface DuplicateScanRow {
+  id: number;
+  displayName: string;
+  bpm: number;
+  key: string;
+  playcount: number | null;
+  durationSec: number | null;
+  location: string;
+}
+
+export interface PermanentlyDeleteResult {
+  deleted: number;
+}
+
 export interface TrackCheatResult {
   ok: boolean;
   results?: Array<{ trackId: number; name: string; bpm: number; key: string; camp: string | null; lane: string | null }>;
@@ -146,7 +161,13 @@ const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
     getStatus: (): Promise<LibraryStatus> => ipcRenderer.invoke("library:getStatus"),
-    getAllTracks: (): Promise<LibraryRow[]> => ipcRenderer.invoke("library:getAllTracks")
+    getAllTracks: (): Promise<LibraryRow[]> => ipcRenderer.invoke("library:getAllTracks"),
+    // Step 5, piece 9 (Duplicate Finder).
+    getTracksForDuplicateScan: (): Promise<DuplicateScanRow[]> => ipcRenderer.invoke("library:getTracksForDuplicateScan"),
+    // The deliberate "Apply Permanently" action only - never called by
+    // the default, session-only "Send to Recycle Bin" path.
+    permanentlyDeleteTracks: (trackIds: number[]): Promise<PermanentlyDeleteResult> =>
+      ipcRenderer.invoke("library:permanentlyDeleteTracks", trackIds)
   },
   prefs: {
     get: (key: string): Promise<string | null> => ipcRenderer.invoke("prefs:get", key),

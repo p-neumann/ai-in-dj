@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 import LibraryScreen from "./library/LibraryScreen";
+import DuplicateFinderScreen from "./duplicateFinder/DuplicateFinderScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
@@ -221,6 +222,7 @@ export default function App(): React.JSX.Element {
       </section>
 
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
+      <DuplicateFinderScreen refreshSignal={libraryRefreshSignal} />
       <TrackCheatScreen sharedSession={sharedSession} />
       <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} />
       <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />
