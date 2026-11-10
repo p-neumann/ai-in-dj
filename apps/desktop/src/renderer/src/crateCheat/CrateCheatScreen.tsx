@@ -20,9 +20,16 @@
 // Do Not Play/Do Play and thumbs-down exclusions from the same gig never
 // reached it - this is the fix for that, not a new feature.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { buildCrate } from "../api/backendClient";
 import type { SharedSession, CrateTrack } from "../App";
+
+const EXPORT_FORMATS = [
+  { format: "csv" as const, label: "CSV" },
+  { format: "m3u" as const, label: "M3U" },
+  { format: "json" as const, label: "JSON" },
+  { format: "txt" as const, label: "TXT" }
+];
 
 // CLAUDE.md's own documented menu (R4) - six sizes, not an arbitrary range.
 const CRATE_SIZES = [10, 25, 50, 100, 150, 200] as const;
@@ -53,8 +60,64 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
   // stays "high" (Anthropic's own default), nothing about ranking,
   // prompts, or pool selection changes.
   const [effort, setEffort] = useState<"high" | "low">("high");
+  // Step 5, piece 8 (Export). Source: every mutation of the crate list
+  // (a fresh build via setPlaylist(deduped), or an append via
+  // spotifyToPlaylist) also resets selection to ALL-true for the
+  // resulting list - never a partial carry-over of a prior manual
+  // deselection. crateList itself can change from code this screen
+  // doesn't own (Playlist Cheat's "Add To Crate ->" lifts straight to
+  // App.tsx), so that reset is driven by crateList itself here, not by
+  // the two call sites that can change it.
+  const [selected, setSelected] = useState<Record<number, boolean>>({});
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const all: Record<number, boolean> = {};
+    crateList.forEach((_, i) => (all[i] = true));
+    setSelected(all);
+  }, [crateList]);
 
   const isBusy = result.status === "loading";
+  const selectedCount = Object.values(selected).filter(Boolean).length;
+
+  function handleSelectAll(): void {
+    const all: Record<number, boolean> = {};
+    crateList.forEach((_, i) => (all[i] = true));
+    setSelected(all);
+  }
+
+  function selectedTracks(): CrateTrack[] {
+    return crateList.filter((_, i) => selected[i]);
+  }
+
+  async function handleExportFile(format: "csv" | "m3u" | "json" | "txt"): Promise<void> {
+    const tracks = selectedTracks();
+    setExportBusy(true);
+    setExportMessage(null);
+    try {
+      const outcome = await window.ccdj.export.exportCrateTracks({
+        format,
+        trackIds: tracks.map((t) => t.trackId),
+        prompt
+      });
+      setExportMessage(outcome.cancelled ? null : `Saved: ${outcome.filePath}`);
+    } catch (error) {
+      setExportMessage(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  // Copy stays local - no real file path is needed for it, so there's
+  // no reason to round-trip through main for this one.
+  async function handleCopy(): Promise<void> {
+    const text = selectedTracks()
+      .map((t) => t.name)
+      .join("\n");
+    await navigator.clipboard.writeText(text);
+    setExportMessage("Copied to clipboard.");
+  }
 
   async function handleBuildCrate(): Promise<void> {
     if (!prompt.trim()) return;
@@ -185,13 +248,33 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
           when idle/loading/erroring. */}
       <h3 style={{ marginTop: "1rem" }}>Current crate ({crateList.length})</h3>
       {crateList.length === 0 && <p style={{ color: "#888", fontSize: 13 }}>Nothing in the crate yet.</p>}
+
+      {crateList.length > 0 && (
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+          <button onClick={handleSelectAll}>Select All</button>
+          <span style={{ fontSize: 13, color: "#666" }}>{selectedCount} of {crateList.length} selected</span>
+          {EXPORT_FORMATS.map((f) => (
+            <button key={f.format} onClick={() => handleExportFile(f.format)} disabled={exportBusy || selectedCount === 0}>
+              Export {f.label}
+            </button>
+          ))}
+          <button onClick={handleCopy} disabled={selectedCount === 0}>
+            Copy
+          </button>
+        </div>
+      )}
+      {exportMessage && <p style={{ fontSize: 13, color: "#666" }}>{exportMessage}</p>}
+
       <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>
         {/* Index, not trackId, as the key - deliberately not deduped
             (matching Mike), so the same trackId can legitimately appear
             twice. */}
         {crateList.map((t, i) => (
           <li key={i}>
-            {t.name} - {t.bpm} bpm / {t.key}
+            <label>
+              <input type="checkbox" checked={!!selected[i]} onChange={() => setSelected((prev) => ({ ...prev, [i]: !prev[i] }))} />{" "}
+              {t.name} - {t.bpm} bpm / {t.key}
+            </label>
           </li>
         ))}
       </ol>

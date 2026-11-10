@@ -113,6 +113,32 @@ interface CcdjPreferencesResult {
   error?: string;
 }
 
+// Step 5, piece 8 (Export).
+type CcdjExportFormat = "csv" | "m3u" | "json" | "txt";
+
+interface CcdjExportTrackInput {
+  name: string;
+  artist: string;
+  bpm: number | string;
+  key: string;
+  location?: string;
+}
+
+interface CcdjExportJsonTrackInput {
+  name: string;
+  artist: string;
+  bpm: number | string;
+  key: string;
+  isSource?: boolean;
+  isMatch?: boolean;
+  noMatch?: boolean;
+}
+
+interface CcdjExportResult {
+  cancelled: boolean;
+  filePath?: string;
+}
+
 interface Window {
   ccdj: {
     library: {
@@ -158,6 +184,19 @@ interface Window {
         doPlay: CcdjPrefsEntry[];
         doNotPlay: CcdjPrefsEntry[];
       }) => Promise<CcdjPreferencesResult>;
+    };
+    export: {
+      exportCrateTracks: (params: {
+        format: CcdjExportFormat;
+        trackIds: number[];
+        prompt: string;
+      }) => Promise<CcdjExportResult>;
+      exportPlaylistTracks: (params: {
+        format: CcdjExportFormat;
+        tracks: CcdjExportTrackInput[];
+        allTracksForJson: CcdjExportJsonTrackInput[];
+        extraJson: Record<string, unknown>;
+      }) => Promise<CcdjExportResult>;
     };
   };
 }

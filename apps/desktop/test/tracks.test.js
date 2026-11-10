@@ -12,7 +12,8 @@ const {
   getSampleTrackNames,
   getSampleTracks,
   getTrackLocation,
-  getAllTracksForLibrary
+  getAllTracksForLibrary,
+  getTracksByIds
 } = require("../src/main/db/tracks.ts");
 
 function sampleTrack(n) {
@@ -82,6 +83,28 @@ test("getTrackLocation: returns the real path for a known id, and null for an un
   const [track] = getSampleTracks(db, 1);
   assert.equal(getTrackLocation(db, track.id), "/Music/Song 1.mp3");
   assert.equal(getTrackLocation(db, 999999), null, "an id the renderer made up must never resolve to a real path");
+  db.close();
+});
+
+// Step 5, piece 8 (Export) - Crate Cheat's own trackId->real-data lookup.
+test("getTracksByIds: returns displayName/artist/bpm/key/location for known ids, skips unknown ones", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1), sampleTrack(2), sampleTrack(3)]);
+
+  const [t1, , t3] = getSampleTracks(db, 10);
+  const rows = getTracksByIds(db, [t1.id, 999999, t3.id]);
+  assert.equal(rows.length, 2, "the unknown id must be silently dropped, not guessed at or errored on");
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(byId.get(t1.id).location, "/Music/Song 1.mp3");
+  assert.equal(byId.get(t1.id).artist, "Artist 1");
+  db.close();
+});
+
+test("getTracksByIds: an empty id list returns an empty list without touching the database", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  assert.deepEqual(getTracksByIds(db, []), []);
   db.close();
 });
 

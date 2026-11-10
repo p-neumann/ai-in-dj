@@ -26,7 +26,8 @@ import {
   registerHistoryIpc,
   registerFileIpc,
   registerWindowIpc,
-  registerBackendIpc
+  registerBackendIpc,
+  registerExportIpc
 } from "./ipc.ts";
 
 // Must happen before anything else touches the filesystem (the database,
@@ -150,6 +151,7 @@ if (gotSingleInstanceLock) {
     registerFileIpc(db);
     registerWindowIpc();
     registerBackendIpc(db);
+    registerExportIpc(db);
     createWindow();
 
     // macOS keeps an app running with no open windows; clicking the dock

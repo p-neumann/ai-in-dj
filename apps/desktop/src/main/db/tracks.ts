@@ -53,6 +53,30 @@ export function getTrackLocation(db: Database.Database, trackId: number): string
   return row ? row.location : null;
 }
 
+export interface ExportTrackRow {
+  id: number;
+  displayName: string;
+  artist: string;
+  bpm: number;
+  key: string;
+  location: string;
+}
+
+// Step 5, piece 8 (Export) - Crate Cheat's export needs real
+// displayName/artist/bpm/key AND a real location (CSV's Location
+// column, M3U's path line); the renderer never holds a location itself
+// (CLAUDE.md 5.4), so this is resolved here, by trackId, the same
+// trusted-side pattern as getTrackLocation above. Order is NOT
+// guaranteed by SQL's IN() - the caller must re-order by its own
+// trackId list if order matters (the crate's own track order does).
+export function getTracksByIds(db: Database.Database, trackIds: number[]): ExportTrackRow[] {
+  if (trackIds.length === 0) return [];
+  const placeholders = trackIds.map(() => "?").join(",");
+  return db
+    .prepare(`SELECT id, displayName, artist, bpm, key, location FROM tracks WHERE id IN (${placeholders})`)
+    .all(...trackIds) as ExportTrackRow[];
+}
+
 export interface LibraryRow {
   id: number;
   displayName: string;

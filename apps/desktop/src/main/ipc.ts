@@ -2,13 +2,30 @@
 // functions - never generic file access, never a raw path or arbitrary
 // command from the renderer.
 
-import { ipcMain, dialog, shell, BrowserWindow } from "electron";
-import { readFileSync } from "node:fs";
+import { app, ipcMain, dialog, shell, BrowserWindow } from "electron";
+import { readFileSync, writeFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { importLibraryFromCsvText } from "./library/importLibrary.ts";
-import { replaceAllTracks, countTracks, getSampleTracks, getTrackLocation, getAllTracksForLibrary } from "./db/tracks.ts";
+import {
+  replaceAllTracks,
+  countTracks,
+  getSampleTracks,
+  getTrackLocation,
+  getAllTracksForLibrary,
+  getTracksByIds
+} from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
 import { appendHistoryEntry, listHistory } from "./db/history.ts";
+import {
+  buildCsv,
+  buildM3u,
+  buildTxt,
+  buildJson,
+  extensionForFormat,
+  type ExportFormat,
+  type ExportTrack,
+  type ExportJsonTrack
+} from "./export/buildExportContent.ts";
 import {
   checkBackendHealth,
   createBackendSession,
@@ -119,6 +136,107 @@ export function registerFileIpc(db: Database.Database): void {
       return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
     }
   });
+}
+
+// Step 5, piece 8 (Export). Content is built from whatever track
+// objects the caller hands in - a single shared path for both screens'
+// four file formats, even though the two screens resolve those track
+// objects very differently (see registerExportIpc below).
+function buildExportContent(
+  format: ExportFormat,
+  tracks: ExportTrack[],
+  jsonTracks: ExportJsonTrack[],
+  extraJson: Record<string, unknown>
+): string {
+  switch (format) {
+    case "csv":
+      return buildCsv(tracks);
+    case "m3u":
+      return buildM3u(tracks);
+    case "txt":
+      return buildTxt(tracks);
+    case "json":
+      return buildJson(jsonTracks, extraJson, app.getVersion(), new Date().toISOString());
+  }
+}
+
+async function showExportSaveDialog(
+  window: BrowserWindow | null,
+  format: ExportFormat,
+  defaultBaseName: string,
+  content: string
+): Promise<{ cancelled: boolean; filePath?: string }> {
+  const ext = extensionForFormat(format);
+  const dialogOptions: Electron.SaveDialogOptions = {
+    title: "Export",
+    defaultPath: `${defaultBaseName}.${ext}`,
+    filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
+  };
+  const picked = window ? await dialog.showSaveDialog(window, dialogOptions) : await dialog.showSaveDialog(dialogOptions);
+  if (picked.canceled || !picked.filePath) return { cancelled: true };
+  writeFileSync(picked.filePath, content, "utf8");
+  return { cancelled: false, filePath: picked.filePath };
+}
+
+// Step 5, piece 8 (Export) - Crate Cheat and Playlist Cheat.
+//
+// CLAUDE.md 5.4: the renderer never holds a real file location, so a
+// browser-style Blob-and-anchor download (the source's own mechanism)
+// can't carry a real path, and isn't how Electron delivers a file to
+// disk anyway - a native save dialog is the correct replacement
+// mechanism for the same content, not a design change.
+//
+// The two handlers resolve their track data very differently, matching
+// a real, confirmed asymmetry in the source rather than smoothing it
+// over: Crate Cheat's export looks up each trackId's real location and
+// includes it (CSV Location column, M3U path line); Playlist Cheat's
+// own export (handleExportSpotify) never included a location at all,
+// even though the matched tracks have one - so that screen sends
+// already-built track objects straight from the renderer, with no
+// trackId resolution step here at all, and location simply stays
+// absent for every entry (see buildExportContent.ts's header comment).
+export function registerExportIpc(db: Database.Database): void {
+  ipcMain.handle(
+    "files:exportCrateTracks",
+    async (
+      event: Electron.IpcMainInvokeEvent,
+      params: { format: ExportFormat; trackIds: number[]; prompt: string }
+    ): Promise<{ cancelled: boolean; filePath?: string }> => {
+      const rows = getTracksByIds(db, params.trackIds);
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      // Re-ordered to match the crate's own order - getTracksByIds'
+      // SQL IN() does not preserve it. An id no longer in the library
+      // (e.g. a re-import since the crate was built) is dropped, not
+      // guessed at.
+      const tracks: ExportTrack[] = [];
+      for (const id of params.trackIds) {
+        const row = byId.get(id);
+        if (!row) continue;
+        tracks.push({ name: row.displayName, artist: row.artist, bpm: row.bpm, key: row.key, location: row.location });
+      }
+      const jsonTracks: ExportJsonTrack[] = tracks.map((t) => ({ name: t.name, artist: t.artist, bpm: t.bpm, key: t.key }));
+      const content = buildExportContent(params.format, tracks, jsonTracks, { prompt: params.prompt.slice(0, 200) });
+      const window = BrowserWindow.fromWebContents(event.sender);
+      return showExportSaveDialog(window, params.format, "cheatcode_cratecheat", content);
+    }
+  );
+
+  ipcMain.handle(
+    "files:exportPlaylistTracks",
+    async (
+      event: Electron.IpcMainInvokeEvent,
+      params: {
+        format: ExportFormat;
+        tracks: ExportTrack[];
+        allTracksForJson: ExportJsonTrack[];
+        extraJson: Record<string, unknown>;
+      }
+    ): Promise<{ cancelled: boolean; filePath?: string }> => {
+      const content = buildExportContent(params.format, params.tracks, params.allTracksForJson, params.extraJson);
+      const window = BrowserWindow.fromWebContents(event.sender);
+      return showExportSaveDialog(window, params.format, "cheatcode_playlistcheat", content);
+    }
+  );
 }
 
 // Step 4 - setAlwaysOnTop (R18, keeps the prototype's own name).

@@ -18,9 +18,17 @@
 import { useEffect, useState } from "react";
 import { matchPlaylistFromPlainText } from "./matchPlaylist.ts";
 import type { MatchedResult } from "./matchPlaylist.ts";
+import { buildPlaylistExportData } from "./buildPlaylistExportData.ts";
 import type { CrateTrack } from "../App";
 
 const RESULT_COUNTS = [1, 3, 5] as const;
+
+const EXPORT_FORMATS = [
+  { format: "csv" as const, label: "CSV" },
+  { format: "m3u" as const, label: "M3U" },
+  { format: "json" as const, label: "JSON" },
+  { format: "txt" as const, label: "TXT" }
+];
 
 type ResultState =
   | { status: "idle" }
@@ -47,6 +55,8 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
   // per song" (CLAUDE.md 3.2): the data shape makes a second selection
   // for the same song impossible, not just visually discouraged.
   const [selected, setSelected] = useState<Record<number, number>>({});
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   useEffect(() => {
     window.ccdj.library.getAllTracks().then((library) => setState({ status: "ready", library }));
@@ -85,6 +95,32 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
       tracks.push({ trackId: m.id, name: m.displayName, bpm: m.bpm, key: m.key });
     });
     if (tracks.length) onAddToCrate(tracks);
+  }
+
+  // Step 5, piece 8 (Export). Source: handleExportSpotify - CSV/M3U/TXT/
+  // Copy only ever carry the currently-selected match per song; JSON
+  // alone carries the richer source+all-candidates list. Built here,
+  // not in main, since this screen already has everything it needs
+  // (no real location is ever included for this screen's export - see
+  // buildPlaylistExportData.ts).
+  async function handleExportFile(format: "csv" | "m3u" | "json" | "txt"): Promise<void> {
+    const data = buildPlaylistExportData(results, selected);
+    setExportBusy(true);
+    setExportMessage(null);
+    try {
+      const outcome = await window.ccdj.export.exportPlaylistTracks({ format, ...data });
+      setExportMessage(outcome.cancelled ? null : `Saved: ${outcome.filePath}`);
+    } catch (error) {
+      setExportMessage(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function handleCopy(): Promise<void> {
+    const { tracks } = buildPlaylistExportData(results, selected);
+    await navigator.clipboard.writeText(tracks.map((t) => t.name).join("\n"));
+    setExportMessage("Copied to clipboard.");
   }
 
   return (
@@ -140,6 +176,17 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
           <button onClick={handleAddToCrate} disabled={selectedCount() === 0}>
             Add To Crate →
           </button>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", margin: "0.5rem 0" }}>
+            {EXPORT_FORMATS.map((f) => (
+              <button key={f.format} onClick={() => handleExportFile(f.format)} disabled={exportBusy || selectedCount() === 0}>
+                Export {f.label}
+              </button>
+            ))}
+            <button onClick={handleCopy} disabled={selectedCount() === 0}>
+              Copy
+            </button>
+          </div>
+          {exportMessage && <p style={{ fontSize: 13, color: "#666" }}>{exportMessage}</p>}
           <ol style={{ paddingLeft: "1.2rem" }}>
             {results.map((r, ri) => (
               <li key={ri} style={{ marginBottom: "0.5rem" }}>

@@ -116,6 +116,32 @@ export interface PreferencesResult {
   error?: string;
 }
 
+// Step 5, piece 8 (Export).
+export type ExportFormat = "csv" | "m3u" | "json" | "txt";
+
+export interface ExportTrackInput {
+  name: string;
+  artist: string;
+  bpm: number | string;
+  key: string;
+  location?: string;
+}
+
+export interface ExportJsonTrackInput {
+  name: string;
+  artist: string;
+  bpm: number | string;
+  key: string;
+  isSource?: boolean;
+  isMatch?: boolean;
+  noMatch?: boolean;
+}
+
+export interface ExportResult {
+  cancelled: boolean;
+  filePath?: string;
+}
+
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
@@ -165,6 +191,22 @@ const api = {
       doPlay: Array<{ type: string; value: string; persistent: boolean }>;
       doNotPlay: Array<{ type: string; value: string; persistent: boolean }>;
     }): Promise<PreferencesResult> => ipcRenderer.invoke("backend:savePreferences", params)
+  },
+  // Step 5, piece 8 (Export). Two shapes, not one, because the two
+  // screens resolve their track data differently (see ipc.ts's
+  // registerExportIpc) - Crate Cheat sends only trackIds and lets main
+  // resolve real location data; Playlist Cheat sends already-built
+  // track objects straight through, with no location ever (a real
+  // asymmetry in the source, not something invented here).
+  export: {
+    exportCrateTracks: (params: { format: ExportFormat; trackIds: number[]; prompt: string }): Promise<ExportResult> =>
+      ipcRenderer.invoke("files:exportCrateTracks", params),
+    exportPlaylistTracks: (params: {
+      format: ExportFormat;
+      tracks: ExportTrackInput[];
+      allTracksForJson: ExportJsonTrackInput[];
+      extraJson: Record<string, unknown>;
+    }): Promise<ExportResult> => ipcRenderer.invoke("files:exportPlaylistTracks", params)
   }
 };
 
