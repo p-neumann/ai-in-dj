@@ -1,82 +1,114 @@
-// Runs pending migrations in order (CLAUDE.md Section 6.2: "migrations
-// are forward-only scripts with a test; writes use transactions
-// (atomic)"), tracking progress via schema_meta.
+// Migration runner (CLAUDE.md Section 6.2). Not yet called at app startup.
 //
-// All pending migrations now run inside ONE transaction, not one each.
-// Before this change, each migration committed separately: a failure on
-// migration 3 of 5 left 1 and 2 applied and the database sitting at a
-// version nothing in migrations.ts actually describes. Now a failure
-// anywhere rolls the whole attempt back, leaving the database exactly at
-// its original version - "all-or-nothing" the way CLAUDE.md's atomicity
-// requirement actually means it. (Credit: all-pending-migrations-in-one-
-// transaction is the same shape Hannah Sitther's hannah/phase5-desktop
-// branch uses in her own migrate.ts; this version keeps this project's own
-// schema_meta table and per-call signature instead of adopting her
-// schema_migrations design.)
-//
-// This file works on any already-open connection, including a :memory:
-// database that has no file to back up - so it has no opinion about
-// backups. openDatabase.ts is where a real file's pending migration is
-// preceded by a verified backup (backup.ts) when there's existing data to
-// protect; this function only reports what happened (tooNew /
-// migrationFailed / migrated / upToDate) so that caller can act on it.
+// Order of operations:
+//   1. Read the database's schema version, read-only.
+//   2. Newer than this build can read -> refuse, write nothing.
+//   3. Already current -> do nothing.
+//   4. Existing data -> make and verify a backup first; if that fails, stop.
+//   5. Apply every pending migration plus its version row in ONE transaction,
+//      so a failure anywhere leaves the database exactly at its old version.
 
-import type Database from "better-sqlite3";
-import { ensureMetaTable, getSchemaVersion } from "./schemaMeta.ts";
-import { migrations as defaultMigrations, type Migration } from "./migrations.ts";
-
-export { getSchemaVersion } from "./schemaMeta.ts";
+import Database from "better-sqlite3";
+import { existsSync, rmSync } from "node:fs";
+import { createVerifiedBackup } from "./backup.ts";
+import { applyConnectionSettings, BUSY_TIMEOUT_MS } from "./connection.ts";
+import { MIGRATIONS, type Migration } from "./migrations.ts";
+import { readSchemaVersion, userTableNames, VERSION_TABLE } from "./schema.ts";
 
 export type MigrateResult =
   | { status: "upToDate"; version: number }
-  | { status: "migrated"; from: number; to: number }
+  | { status: "migrated"; from: number; to: number; backupPath: string | null }
   | { status: "tooNew"; version: number; maxReadable: number }
-  | { status: "migrationFailed"; version: number; failedAt: number; error: string };
+  | { status: "backupFailed"; version: number; error: string }
+  | {
+      status: "migrationFailed";
+      version: number;
+      failedAt: number;
+      error: string;
+      backupPath: string | null;
+    };
 
-// migrationsList is overridable only so tests can inject a migration that
-// deliberately throws, to prove the all-or-nothing rollback for real - the
-// real app always calls this with the default, real migrations.ts list.
-export function runMigrations(
-  db: Database.Database,
-  migrationsList: readonly Migration[] = defaultMigrations
-): MigrateResult {
-  ensureMetaTable(db);
-  const current = getSchemaVersion(db);
-  const target = migrationsList.length ? migrationsList[migrationsList.length - 1].version : 0;
+export interface MigrateOptions {
+  // Replaceable so tests can force a backup failure.
+  backup?: (source: Database, dbPath: string, version: number) => Promise<string>;
+}
 
-  // CLAUDE.md Section 6.2: "if the database is newer than it understands,
-  // it must not write to it." Checked before anything else runs, so a
-  // too-new database is never touched at all, not even to try.
-  if (current > target) {
-    return { status: "tooNew", version: current, maxReadable: target };
-  }
-  if (current === target) {
-    return { status: "upToDate", version: current };
-  }
+export function assertValidMigrations(migrations: readonly Migration[]): void {
+  if (migrations.length === 0) throw new Error("migration list is empty");
+  migrations.forEach((m, i) => {
+    if (m.version !== i + 1) {
+      throw new Error(`migration versions must be contiguous from 1; position ${i} has ${m.version}`);
+    }
+    if (!m.name.trim()) throw new Error(`migration ${m.version} has no name`);
+  });
+}
 
-  const pending = migrationsList.filter((m) => m.version > current).sort((a, b) => a.version - b.version);
-  let failedAt = 0;
+export async function migrate(
+  dbPath: string,
+  migrations: readonly Migration[] = MIGRATIONS,
+  options: MigrateOptions = {}
+): Promise<MigrateResult> {
+  assertValidMigrations(migrations);
+  const target = migrations[migrations.length - 1].version;
+  const makeBackup = options.backup ?? createVerifiedBackup;
 
-  try {
-    const applyAll = db.transaction(() => {
-      for (const migration of pending) {
-        failedAt = migration.version;
-        migration.up(db);
-        db.prepare("UPDATE schema_meta SET version = ? WHERE id = 1").run(migration.version);
+  const existed = existsSync(dbPath);
+  let current = 0;
+  let backupPath: string | null = null;
+
+  if (existed) {
+    const ro = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      current = readSchemaVersion(ro);
+      if (current > target) return { status: "tooNew", version: current, maxReadable: target };
+      if (current === target) return { status: "upToDate", version: current };
+      if (userTableNames(ro).length > 0) {
+        try {
+          backupPath = await makeBackup(ro, dbPath, current);
+        } catch (err) {
+          return { status: "backupFailed", version: current, error: errorMessage(err) };
+        }
       }
-    });
-    applyAll();
+    } finally {
+      ro.close();
+    }
+  }
+
+  const pending = migrations.filter((m) => m.version > current);
+  const db = new Database(dbPath, { timeout: BUSY_TIMEOUT_MS });
+  let applying = 0;
+  try {
+    // synchronous=FULL and foreign keys, before the transaction starts
+    // (SQLite refuses to change synchronous inside one). Journal mode is left
+    // to openDatabase(). If this throws, the result is migrationFailed with
+    // failedAt 0: nothing was applied.
+    applyConnectionSettings(db);
+    db.transaction(() => {
+      const record = () =>
+        db.prepare(`INSERT INTO ${VERSION_TABLE} (version, name, applied_at) VALUES (?, ?, ?)`);
+      for (const m of pending) {
+        applying = m.version;
+        m.up(db);
+        record().run(m.version, m.name, new Date().toISOString());
+      }
+    })();
   } catch (err) {
-    // better-sqlite3 already rolled back everything this transaction did -
-    // every migration in `pending`, not just the one that threw - so
-    // getSchemaVersion(db) is still `current` here, unchanged.
+    db.close();
+    // A brand-new file that failed its first migration holds nothing worth
+    // keeping; remove it so the next launch starts clean.
+    if (!existed) rmSync(dbPath, { force: true });
     return {
       status: "migrationFailed",
       version: current,
-      failedAt,
-      error: err instanceof Error ? err.message : String(err)
+      failedAt: applying,
+      error: errorMessage(err),
+      backupPath
     };
   }
+  db.close();
+  return { status: "migrated", from: current, to: target, backupPath };
+}
 
-  return { status: "migrated", from: current, to: target };
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

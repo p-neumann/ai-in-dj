@@ -1,3 +1,5 @@
+// Adopted unchanged from Ranjish Kumar's ranjish/ccdj-desktop branch.
+//
 // A real, RFC-4180-compliant CSV parser (CLAUDE.md Section 6.1 / R24).
 // Handles what a naive split(",") parser can't: commas inside quoted
 // fields, literal quotes escaped as "", and newlines inside a quoted

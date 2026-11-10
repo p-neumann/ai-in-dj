@@ -1,3 +1,7 @@
+// Adopted from Ranjish Kumar's ranjish/ccdj-desktop branch. Changed: an
+// unknown bpm or year is null instead of 0 (CLAUDE.md 6.1: "year (0 ->
+// unknown)"), and Track is the tracks table's input shape (db/tracks.ts).
+//
 // Turns one raw CSV row into a consistent Track shape (CLAUDE.md Section
 // 6.1). A row is only kept if it has a title, location, or filename -
 // same rule the prototype itself used - everything else is reported as
@@ -8,6 +12,8 @@
 // convert musical notes to Camelot notation, it only cleans up the
 // DJ-software notation variants that are already Camelot-shaped ("8M" ->
 // "8A", "2D" -> "2B", stray characters stripped).
+
+import type { TrackInput } from "../db/tracks.ts";
 
 const CAMELOT_KEYS = new Set([
   "1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B", "5A", "5B", "6A", "6B",
@@ -45,19 +51,7 @@ function parseDurationToSeconds(value: string | undefined): number | null {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-export interface Track {
-  displayName: string;
-  artist: string;
-  title: string;
-  bpm: number;
-  key: string;
-  genre: string;
-  year: number;
-  playcount: number | null;
-  durationSec: number | null;
-  location: string;
-  extra: Record<string, string>;
-}
+export type Track = TrackInput;
 
 export interface NormalizeResult {
   track: Track | null;
@@ -112,10 +106,10 @@ export function normalizeTrack(row: Record<string, string>): NormalizeResult {
     displayName: getDisplayName({ location: effectiveLocation, artist, title }),
     artist,
     title,
-    bpm: Number.isFinite(bpm) ? bpm : 0,
+    bpm: Number.isFinite(bpm) ? bpm : null,
     key: normalizeKey(row.key),
     genre: row.genre?.trim() || "",
-    year: Number.isFinite(year) ? year : 0,
+    year: Number.isFinite(year) && year !== 0 ? year : null,
     playcount: playcount !== null && Number.isFinite(playcount) ? playcount : null,
     durationSec: parseDurationToSeconds(row.duration),
     location: effectiveLocation,

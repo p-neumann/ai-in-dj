@@ -1,3 +1,5 @@
+// Adopted unchanged from Ranjish Kumar's ranjish/ccdj-desktop branch.
+//
 // Ties the CSV reader and row-normalizer together, and never crashes on
 // a bad row (CLAUDE.md 6.1: "Record rejected rows with line number and
 // reason; never crash the import"). Line numbers are 1-based and count

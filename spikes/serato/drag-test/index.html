@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>CCDJ spike — drag test</title>
+<style>
+  body { font: 13px system-ui, sans-serif; margin: 12px; background: #1b1b1f; color: #ddd; }
+  h2 { font-size: 14px; margin: 14px 0 6px; }
+  #drop { border: 2px dashed #777; padding: 28px; text-align: center; border-radius: 8px; }
+  #drop.over { border-color: #4caf50; background: #233; }
+  .row { padding: 6px 8px; margin: 3px 0; background: #2a2a31; border-radius: 4px; cursor: grab; }
+  #log { white-space: pre-wrap; font: 12px Consolas, monospace; background: #111; padding: 8px;
+         height: 300px; overflow: auto; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h2>Drag IN — drop something from Serato here</h2>
+<div id="drop">Drop zone</div>
+
+<h2>Drag OUT — drag a row onto a Serato deck or library</h2>
+<div id="rows"></div>
+
+<h2>Log <button id="clear">clear</button></h2>
+<div id="log"></div>
+
+<script>
+  const logEl = document.getElementById("log");
+  function log(line) {
+    logEl.textContent += line + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+    window.spike.log(line);
+  }
+  document.getElementById("clear").onclick = () => { logEl.textContent = ""; };
+
+  // Drag IN
+  const drop = document.getElementById("drop");
+  let entered = false;
+  drop.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    if (!entered) { entered = true; log("dragenter types: " + JSON.stringify([...e.dataTransfer.types])); }
+    drop.classList.add("over");
+  });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); });
+  drop.addEventListener("dragleave", () => { drop.classList.remove("over"); });
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    entered = false;
+    drop.classList.remove("over");
+    const dt = e.dataTransfer;
+    log("=== DROP ===");
+    log("types: " + JSON.stringify([...dt.types]));
+    for (const t of dt.types) {
+      if (t === "Files") continue;
+      let v;
+      try { v = dt.getData(t); } catch (err) { v = "(error " + err.message + ")"; }
+      log("  getData(" + JSON.stringify(t) + ") = " + JSON.stringify(v).slice(0, 500));
+    }
+    log("items: " + dt.items.length);
+    for (const it of dt.items) log("  item kind=" + it.kind + " type=" + JSON.stringify(it.type));
+    log("files: " + dt.files.length);
+    for (const f of dt.files) {
+      log("  file name=" + JSON.stringify(f.name) + " size=" + f.size + " type=" + JSON.stringify(f.type));
+      log("       path=" + window.spike.pathForFile(f));
+    }
+  });
+
+  // Drag OUT
+  window.spike.demoNames().then((names) => {
+    const rows = document.getElementById("rows");
+    if (!names.length) { rows.textContent = "(no demo tracks found)"; return; }
+    names.forEach((name, i) => {
+      const r = document.createElement("div");
+      r.className = "row";
+      r.draggable = true;
+      r.textContent = name;
+      r.addEventListener("dragstart", (e) => {
+        e.preventDefault();          // hand the drag to the OS via startDrag
+        window.spike.startDrag(i);
+        log("drag out started: " + name);
+      });
+      r.addEventListener("dragend", () => log("dragend: " + name));
+      rows.appendChild(r);
+    });
+  });
+</script>
+</body>
+</html>

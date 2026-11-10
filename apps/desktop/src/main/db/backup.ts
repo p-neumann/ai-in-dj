@@ -1,51 +1,44 @@
-// Verified pre-migration snapshot (CLAUDE.md Section 6.2: "Before running
-// any migration, the app saves a versioned snapshot of the database file
-// (e.g. ccdj-db.v<old-schema>.bak) and verifies the copy"). Used only when
-// a database that already holds real data is about to be migrated - a
-// brand-new, empty database has nothing yet worth protecting.
+// Pre-migration snapshot (CLAUDE.md Section 6.2): "Before running any
+// migration, the app saves a versioned snapshot of the database file and
+// verifies the copy."
 //
-// Credit: using SQLite's own online backup API instead of a plain file
-// copy - so a recent write still sitting only in the WAL side file (not
-// yet folded into the main file) is still captured - and the
-// write-to-a-temp-name / verify / only-then-rename pattern (so a
-// half-written or bad backup can never be mistaken for a real, restorable
-// one) are both adapted from Hannah Sitther's hannah/phase5-desktop branch
-// (apps/desktop/src/main/db/backup.ts). The verification checks here
-// (integrity_check, schema version, per-table row counts) follow her
-// approach; the code is rewritten against this project's own schema_meta
-// bookkeeping (schemaMeta.ts) rather than her schema_migrations table.
+// The copy is made with SQLite's online backup API (better-sqlite3's
+// db.backup), not a file copy: in WAL mode recent writes can live in the -wal
+// file, which a plain copy of the main file would miss.
 
 import Database from "better-sqlite3";
-import { copyFileSync, renameSync, rmSync } from "node:fs";
+import { renameSync, rmSync } from "node:fs";
 import { join, parse } from "node:path";
-import { getSchemaVersion, tableRowCounts } from "./schemaMeta.ts";
+import { readSchemaVersion, tableRowCounts } from "./schema.ts";
 
 export interface BackupExpectation {
   version: number;
   rowCounts: Record<string, number>;
 }
 
-// <dir>/ccdj.sqlite at version 2 -> <dir>/ccdj.v2.bak
+// <dir>/ccdj-db.sqlite at version 3 -> <dir>/ccdj-db.v3.bak
 export function backupPathFor(dbPath: string, version: number): string {
   const { dir, name } = parse(dbPath);
   return join(dir, `${name}.v${version}.bak`);
 }
 
-// Throws if the backup cannot be made or verified - the caller
-// (openDatabase.ts) must not migrate in that case (CLAUDE.md: "if the
-// backup cannot be made and verified, do not write").
+// Writes to a temporary name, verifies it, and only then renames it into
+// place, so a half-written or unverified copy never carries the .bak name.
+// A verified backup of the same version from an earlier attempt is replaced
+// by the fresher one. Throws if the backup cannot be made or verified; the
+// caller must not migrate in that case.
 export async function createVerifiedBackup(
-  source: Database.Database,
+  source: Database,
   dbPath: string,
   version: number
 ): Promise<string> {
   const finalPath = backupPathFor(dbPath, version);
   const tmpPath = `${finalPath}.tmp`;
   rmSync(tmpPath, { force: true });
-  const expectedRowCounts = tableRowCounts(source);
   try {
     await source.backup(tmpPath);
-    verifyBackup(tmpPath, { version, rowCounts: expectedRowCounts });
+    makeSelfContained(tmpPath);
+    verifyBackup(tmpPath, { version, rowCounts: tableRowCounts(source) });
     renameSync(tmpPath, finalPath);
   } catch (err) {
     rmSync(tmpPath, { force: true });
@@ -54,10 +47,26 @@ export async function createVerifiedBackup(
   return finalPath;
 }
 
-// Opens the copy read-only and checks it is a sound database holding the
-// same schema version and the same row count in every table that the
-// source had at the moment the backup started.
-function verifyBackup(path: string, expected: BackupExpectation): void {
+// The backup API copies the source's header, so a WAL source gives a WAL
+// backup, and any later open (even read-only) creates -wal/-shm files beside
+// it that a rename would leave behind. Switching the copy to rollback-journal
+// mode makes it one self-contained file. Closing this, the only connection,
+// removes its side files. openDatabase() turns WAL back on if it is restored.
+function makeSelfContained(path: string): void {
+  const db = new Database(path, { fileMustExist: true });
+  try {
+    const mode = db.pragma("journal_mode = DELETE", { simple: true });
+    if (mode !== "delete") {
+      throw new Error(`could not make backup self-contained (SQLite reported ${String(mode)})`);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+// Opens the copy read-only and checks it is a sound database holding the same
+// schema version and the same number of rows in every table as the source.
+export function verifyBackup(path: string, expected: BackupExpectation): void {
   const copy = new Database(path, { readonly: true, fileMustExist: true });
   try {
     const integrity = copy.pragma("integrity_check", { simple: true });
@@ -65,7 +74,7 @@ function verifyBackup(path: string, expected: BackupExpectation): void {
       throw new Error(`backup failed integrity_check: ${String(integrity)}`);
     }
 
-    const version = getSchemaVersion(copy);
+    const version = readSchemaVersion(copy);
     if (version !== expected.version) {
       throw new Error(`backup has schema version ${version}, expected ${expected.version}`);
     }
@@ -82,18 +91,4 @@ function verifyBackup(path: string, expected: BackupExpectation): void {
   } finally {
     copy.close();
   }
-}
-
-// Restores a verified backup over the real database file - the production
-// counterpart of CLAUDE.md's "offers to restore the most recent compatible
-// snapshot." No restore UI exists yet (nothing in the app calls this
-// today); it's exercised directly by tests for now so the mechanism is
-// proven and ready for that UI without changes. Removes any stray WAL/SHM
-// side files first so a restored copy never gets merged with leftover
-// writes from the database it's replacing.
-export function restoreFromBackup(backupPath: string, dbPath: string): void {
-  rmSync(dbPath, { force: true });
-  rmSync(`${dbPath}-wal`, { force: true });
-  rmSync(`${dbPath}-shm`, { force: true });
-  copyFileSync(backupPath, dbPath);
 }

@@ -1,33 +1,67 @@
-// Storing imported tracks. Replaces the whole table in one transaction
-// per import (CLAUDE.md 6.2: "writes use transactions (atomic)") - this
-// app has no screen to review changes yet, so a clean replace is the
-// honest, simple behavior for this step, not a silent partial merge.
+// The imported library (migration 5). Function names and shapes adopted from
+// Ranjish Kumar's ranjish/ccdj-desktop branch, so his screens can call them;
+// the differences are the stable string trackId (docs/decisions/0008) and
+// null for an unknown bpm or year.
 
 import type Database from "better-sqlite3";
-import type { Track } from "../library/normalizeTrack.ts";
+import { trackId } from "./trackId.ts";
 
-export function replaceAllTracks(db: Database.Database, tracks: Track[]): void {
-  const insert = db.prepare(`
-    INSERT INTO tracks (displayName, artist, title, bpm, key, genre, year, playcount, durationSec, location, extra)
-    VALUES (@displayName, @artist, @title, @bpm, @key, @genre, @year, @playcount, @durationSec, @location, @extra)
-  `);
-
-  const replaceAll = db.transaction((rows: Track[]) => {
-    db.prepare("DELETE FROM tracks").run();
-    for (const track of rows) {
-      insert.run({ ...track, extra: JSON.stringify(track.extra) });
-    }
-  });
-
-  replaceAll(tracks);
+// One normalized row, as the CSV import produces it.
+export interface TrackInput {
+  displayName: string;
+  artist: string;
+  title: string;
+  bpm: number | null;
+  key: string;
+  genre: string;
+  year: number | null;
+  playcount: number | null;
+  durationSec: number | null;
+  location: string;
+  extra: Record<string, string>;
 }
 
-export function countTracks(db: Database.Database): number {
+export interface ReplaceResult {
+  inserted: number;
+  // Later rows whose location repeats an earlier one (same file, same ID).
+  // The first is kept; these are reported instead of failing the import.
+  duplicateLocations: string[];
+}
+
+// A full import replaces the whole table in one transaction (CLAUDE.md 6.2:
+// writes are atomic). IDs come from locations, so a re-import of the same
+// files gives the same IDs.
+export function replaceAllTracks(db: Database, tracks: TrackInput[]): ReplaceResult {
+  const insert = db.prepare(`
+    INSERT INTO tracks (id, displayName, artist, title, bpm, key, genre, year, playcount, durationSec, location, extra)
+    VALUES (@id, @displayName, @artist, @title, @bpm, @key, @genre, @year, @playcount, @durationSec, @location, @extra)
+  `);
+
+  const replaceAll = db.transaction((rows: TrackInput[]): ReplaceResult => {
+    db.prepare("DELETE FROM tracks").run();
+    const seen = new Set<string>();
+    const duplicateLocations: string[] = [];
+    for (const track of rows) {
+      const id = trackId(track.location);
+      if (seen.has(id)) {
+        duplicateLocations.push(track.location);
+        continue;
+      }
+      seen.add(id);
+      insert.run({ ...track, id, extra: JSON.stringify(track.extra) });
+    }
+    return { inserted: seen.size, duplicateLocations };
+  });
+
+  return replaceAll(tracks);
+}
+
+export function countTracks(db: Database): number {
   const row = db.prepare("SELECT COUNT(*) AS n FROM tracks").get() as { n: number };
   return row.n;
 }
 
-export function getSampleTrackNames(db: Database.Database, limit: number): string[] {
+export function getSampleTrackNames(db: Database, limit: number): string[] {
   const rows = db.prepare("SELECT displayName FROM tracks LIMIT ?").all(limit) as Array<{
     displayName: string;
   }>;
@@ -35,83 +69,39 @@ export function getSampleTrackNames(db: Database.Database, limit: number): strin
 }
 
 export interface SampleTrack {
-  id: number;
+  id: string;
   displayName: string;
 }
 
-export function getSampleTracks(db: Database.Database, limit: number): SampleTrack[] {
+export function getSampleTracks(db: Database, limit: number): SampleTrack[] {
   return db.prepare("SELECT id, displayName FROM tracks LIMIT ?").all(limit) as SampleTrack[];
 }
 
-// The renderer only ever says "show me track #N" - it never gets to hand
-// the main process a raw path itself (CLAUDE.md 7.5: "File operations
-// accept only trackIds... never a raw path from the renderer").
-export function getTrackLocation(db: Database.Database, trackId: number): string | null {
-  const row = db.prepare("SELECT location FROM tracks WHERE id = ?").get(trackId) as
+// The renderer only ever names a trackId; the real path is looked up here, in
+// the main process (CLAUDE.md 7.5). null for an unknown ID, never a guess.
+export function getTrackLocation(db: Database, id: string): string | null {
+  const row = db.prepare("SELECT location FROM tracks WHERE id = ?").get(id) as
     | { location: string }
     | undefined;
   return row ? row.location : null;
 }
 
-export interface ExportTrackRow {
-  id: number;
-  displayName: string;
-  artist: string;
-  bpm: number;
-  key: string;
-  location: string;
-}
-
-// Step 5, piece 8 (Export) - Crate Cheat's export needs real
-// displayName/artist/bpm/key AND a real location (CSV's Location
-// column, M3U's path line); the renderer never holds a location itself
-// (CLAUDE.md 5.4), so this is resolved here, by trackId, the same
-// trusted-side pattern as getTrackLocation above. Order is NOT
-// guaranteed by SQL's IN() - the caller must re-order by its own
-// trackId list if order matters (the crate's own track order does).
-export function getTracksByIds(db: Database.Database, trackIds: number[]): ExportTrackRow[] {
-  if (trackIds.length === 0) return [];
-  const placeholders = trackIds.map(() => "?").join(",");
-  return db
-    .prepare(`SELECT id, displayName, artist, bpm, key, location FROM tracks WHERE id IN (${placeholders})`)
-    .all(...trackIds) as ExportTrackRow[];
-}
-
 export interface LibraryRow {
-  id: number;
+  id: string;
   displayName: string;
   artist: string;
   title: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   genre: string;
-  year: number;
+  year: number | null;
   playcount: number | null;
 }
 
-// Step 5, piece 2 (Library screen). Measured directly against the real
-// ~38,484-track library before choosing this: fetching every row with no
-// filter takes ~7-10ms at the database level, and transferring that many
-// rows out takes ~50-60ms total - cheap enough to do ONCE when the screen
-// opens, then search instantly in the renderer's own memory, rather than
-// round-tripping to the database on every keystroke (which measured
-// slower overall for fast typing, not faster). No search-specific SQL,
-// no index, no FTS5 - deliberately: a leading-wildcard LIKE search can't
-// use a plain index anyway, and FTS5 only measured ~8ms faster than plain
-// LIKE at this size, not something a person could feel while typing.
-export function getAllTracksForLibrary(db: Database.Database): LibraryRow[] {
+// The Library screen's rows, and the shape synced to the server: no location
+// or extra, so no file path ever leaves this process (CLAUDE.md 5.4).
+export function getAllTracksForLibrary(db: Database): LibraryRow[] {
   return db
     .prepare("SELECT id, displayName, artist, title, bpm, key, genre, year, playcount FROM tracks")
     .all() as LibraryRow[];
 }
-
-// Step 5, piece 3 (Track Cheat), revised per Ranjish's real-library test:
-// the backend no longer gets the library inline on every recommend call
-// (that's what produced the real 413 - see docs/decisions/0009). The
-// desktop app now syncs the library to the backend ONCE (reusing this
-// same lean, no-location shape already built for the Library screen -
-// CLAUDE.md 5.4's privacy rule: send displayName, never a real path),
-// and every recommend call afterward refers to it by libraryRevision
-// only. getAllTracksForLibrary (above) IS the sync payload shape now -
-// no separate "backend" projection needed, and no location ever leaves
-// this process.

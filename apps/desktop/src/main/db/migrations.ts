@@ -1,73 +1,109 @@
-// Forward-only migrations (CLAUDE.md Section 6.2: "migrations are
-// forward-only scripts with a test"). Each entry only ever ADDS - never
-// edit a migration that's already shipped; add a new, higher-numbered one
-// instead, even to fix a mistake in an earlier one.
+// The local database's schema history (CLAUDE.md Section 6.2).
+//
+// Rules for this list:
+// - Forward-only. Never edit or remove a migration once it has shipped; add a
+//   new one with the next version number.
+// - Expand -> contract. A release may only ADD tables/columns the previous
+//   release safely ignores. Removing or renaming ships in a later release.
+// - Versions are contiguous from 1. The last entry is the highest schema
+//   version this build can read; a newer database is refused, not written.
+// - All pending migrations run in one transaction, so statements that SQLite
+//   refuses inside a transaction (e.g. PRAGMA journal_mode) do not belong here.
 
 import type Database from "better-sqlite3";
+import { VERSION_TABLE } from "./schema.ts";
 
 export interface Migration {
-  version: number;
-  up: (db: Database.Database) => void;
+  readonly version: number;
+  readonly name: string;
+  up(db: Database): void;
 }
 
-export const migrations: Migration[] = [
+export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
+    name: "create schema_migrations",
+    up(db) {
+      db.exec(`
+        CREATE TABLE ${VERSION_TABLE} (
+          version    INTEGER PRIMARY KEY,
+          name       TEXT NOT NULL,
+          applied_at TEXT NOT NULL
+        )
+      `);
+    }
+  },
+  {
+    // Table and functions adopted from Ranjish Kumar's ranjish/ccdj-desktop
+    // branch (his migration 1), so his screens can run on this database unchanged.
+    version: 2,
+    name: "create window_bounds",
     up(db) {
       db.exec(`
         CREATE TABLE window_bounds (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          x INTEGER,
-          y INTEGER,
-          width INTEGER NOT NULL,
+          id     INTEGER PRIMARY KEY CHECK (id = 1),
+          x      INTEGER,
+          y      INTEGER,
+          width  INTEGER NOT NULL,
           height INTEGER NOT NULL
-        );
-        CREATE TABLE preferences (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        );
+        )
       `);
     }
   },
   {
-    // Step 3: library import. A re-import (step 3's only import path for
-    // now) replaces the whole table inside one transaction - CLAUDE.md's
-    // real revision-based sync (only upserting changes) is later, Phase 5/6
-    // work, not built here.
-    version: 2,
+    // Adopted from Ranjish Kumar's branch (his migration 1). Permanent
+    // preferences only; session-only entries never reach this table.
+    version: 3,
+    name: "create preferences",
     up(db) {
       db.exec(`
-        CREATE TABLE tracks (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          displayName TEXT NOT NULL,
-          artist TEXT NOT NULL,
-          title TEXT NOT NULL,
-          bpm REAL NOT NULL,
-          key TEXT NOT NULL,
-          genre TEXT NOT NULL,
-          year INTEGER NOT NULL,
-          playcount INTEGER,
-          durationSec INTEGER,
-          location TEXT NOT NULL,
-          extra TEXT NOT NULL
-        );
+        CREATE TABLE preferences (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
       `);
     }
   },
   {
-    // Step 4: a generic history log. The real session-history SHAPE
-    // (seed, vibeOffset, trigger, results[], etc. - CLAUDE.md Section 6.5)
-    // doesn't exist to store yet, since real Track Cheat isn't built until
-    // step 5 - storing an arbitrary JSON entry now means step 5 can start
-    // writing the real shape later without this table needing to change.
-    version: 3,
+    // Adopted from Ranjish Kumar's branch (his migration 3). entry_id holds
+    // the entry's own "id" (CLAUDE.md 6.5) so an entry can be updated later,
+    // when a result is dragged or voted on, or a note is added.
+    version: 4,
+    name: "create history",
     up(db) {
       db.exec(`
         CREATE TABLE history (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
           timestamp INTEGER NOT NULL,
-          entry TEXT NOT NULL
-        );
+          entry     TEXT NOT NULL,
+          entry_id  TEXT UNIQUE
+        )
+      `);
+    }
+  },
+  {
+    // Columns adopted from Ranjish Kumar's branch (his migration 2), with
+    // two changes: id is the stable trackId (docs/decisions/0008), not an
+    // auto-number, and bpm/year may be NULL for unknown instead of 0
+    // (CLAUDE.md 6.1). location stays on this computer only (CLAUDE.md 5.4).
+    version: 5,
+    name: "create tracks",
+    up(db) {
+      db.exec(`
+        CREATE TABLE tracks (
+          id          TEXT PRIMARY KEY,
+          displayName TEXT NOT NULL,
+          artist      TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          bpm         REAL,
+          key         TEXT NOT NULL,
+          genre       TEXT NOT NULL,
+          year        INTEGER,
+          playcount   INTEGER,
+          durationSec INTEGER,
+          location    TEXT NOT NULL,
+          extra       TEXT NOT NULL
+        )
       `);
     }
   }

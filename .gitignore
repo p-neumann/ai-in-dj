@@ -41,3 +41,6 @@ apps/desktop/test/fixtures/reveal-in-finder-manual-test.csv
 # October not to share this folder) - kept on disk, excluded here so it
 # can't be re-added by accident.
 apps/server/manual-test/
+
+# Local Claude Code guide (kept out of the repo, from hannah/phase5-desktop)
+CLAUDE.md
