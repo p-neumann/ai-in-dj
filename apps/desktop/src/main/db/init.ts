@@ -1,6 +1,6 @@
 // Opens the app's database at startup (docs/decisions/0007;
-// docs/design-notes/startup-database-init.md sections 3 and 4). Not yet
-// called at app startup.
+// docs/design-notes/startup-database-init.md sections 3 and 4). Called from
+// src/main/index.ts at startup.
 //
 // Order of operations:
 //   1. Create the folder.
