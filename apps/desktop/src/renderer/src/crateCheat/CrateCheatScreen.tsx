@@ -22,7 +22,7 @@
 
 import { useState } from "react";
 import { buildCrate } from "../api/backendClient";
-import type { SharedSession } from "../App";
+import type { SharedSession, CrateTrack } from "../App";
 
 // CLAUDE.md's own documented menu (R4) - six sizes, not an arbitrary range.
 const CRATE_SIZES = [10, 25, 50, 100, 150, 200] as const;
@@ -35,9 +35,15 @@ type ResultState =
 
 interface CrateCheatScreenProps {
   sharedSession: SharedSession | null;
+  // docs/decisions/0019: the crate itself is lifted to App.tsx, shared
+  // with Playlist Cheat's "Add To Crate" - this screen replaces the
+  // whole list on a build (source: setPlaylist(deduped)); it does not
+  // own the list.
+  crateList: CrateTrack[];
+  setCrateList: (next: CrateTrack[]) => void;
 }
 
-export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProps): React.JSX.Element {
+export default function CrateCheatScreen({ sharedSession, crateList, setCrateList }: CrateCheatScreenProps): React.JSX.Element {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<number>(10);
   const [crateVibePrompt, setCrateVibePrompt] = useState("");
@@ -71,6 +77,11 @@ export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProp
         return;
       }
       setResult({ status: "done", data });
+      // Source: setPlaylist(deduped) - a build REPLACES the crate, it
+      // does not merge with whatever Playlist Cheat already added.
+      setCrateList(
+        (data.results ?? []).map((r) => ({ trackId: r.trackId, name: r.name, bpm: r.bpm, key: r.key }))
+      );
     } catch (error) {
       setResult({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
@@ -145,36 +156,45 @@ export default function CrateCheatScreen({ sharedSession }: CrateCheatScreenProp
 
       {result.status === "error" && <p style={{ color: "#c62828" }}>Error: {result.message}</p>}
       {result.status === "done" && (
-        <div style={{ marginTop: "0.5rem" }}>
-          <p style={{ fontSize: 13, color: "#666" }}>
-            {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
-            {result.data.candidatePoolSize ?? 0}
-            {result.data.shortfallReason && (
-              <>
-                {" "}
-                &middot; <span style={{ color: "#c62828" }}>shortfall: {result.data.shortfallReason}</span>
-              </>
-            )}
-            {result.data.knowledgeCallMade && <> &middot; knowledge call: {result.data.knowledgeCallMade}</>}
-            {" "}&middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"} &middot; effort{" "}
-            {result.data.effortUsed ?? "n/a"}
-            {result.data.retried && (
-              <span style={{ color: "#a15c00" }}>
-                {" "}
-                &middot; retried automatically (reason: {result.data.retryReason}) - used reduced thinking
-              </span>
-            )}
-          </p>
-          {(result.data.results ?? []).length === 0 && <p>No matches.</p>}
-          <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>
-            {(result.data.results ?? []).map((r) => (
-              <li key={r.trackId}>
-                {r.name} - {r.bpm} bpm / {r.key}
-              </li>
-            ))}
-          </ol>
-        </div>
+        <p style={{ fontSize: 13, color: "#666", marginTop: "0.5rem" }}>
+          Last build: {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
+          {result.data.candidatePoolSize ?? 0}
+          {result.data.shortfallReason && (
+            <>
+              {" "}
+              &middot; <span style={{ color: "#c62828" }}>shortfall: {result.data.shortfallReason}</span>
+            </>
+          )}
+          {result.data.knowledgeCallMade && <> &middot; knowledge call: {result.data.knowledgeCallMade}</>}
+          {" "}&middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"} &middot; effort{" "}
+          {result.data.effortUsed ?? "n/a"}
+          {result.data.retried && (
+            <span style={{ color: "#a15c00" }}>
+              {" "}
+              &middot; retried automatically (reason: {result.data.retryReason}) - used reduced thinking
+            </span>
+          )}
+        </p>
       )}
+
+      {/* docs/decisions/0019: this is the crate itself - persists across
+          builds, and across anything Playlist Cheat adds to it, same as
+          Mike's own playlist state. Shown independently of the last
+          build's status above, since it can hold tracks a build never
+          produced (added from Playlist Cheat) or can be non-empty even
+          when idle/loading/erroring. */}
+      <h3 style={{ marginTop: "1rem" }}>Current crate ({crateList.length})</h3>
+      {crateList.length === 0 && <p style={{ color: "#888", fontSize: 13 }}>Nothing in the crate yet.</p>}
+      <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>
+        {/* Index, not trackId, as the key - deliberately not deduped
+            (matching Mike), so the same trackId can legitimately appear
+            twice. */}
+        {crateList.map((t, i) => (
+          <li key={i}>
+            {t.name} - {t.bpm} bpm / {t.key}
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

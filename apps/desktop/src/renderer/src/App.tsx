@@ -26,6 +26,20 @@ export interface SharedSession {
   stateVersion: number;
 }
 
+// docs/decisions/0019: Mike's Crate Cheat tab is a persisting, editable
+// crate, not a one-shot "show the last build" screen - a build replaces
+// this list (source: setPlaylist(deduped)), but Playlist Cheat's "Add To
+// Crate ->" button (source: spotifyToPlaylist) adds to it without
+// erasing what's there. Lifted here, same reason sharedSession is -
+// both Crate Cheat and Playlist Cheat need to see and change the same
+// list, not two separate copies.
+export interface CrateTrack {
+  trackId: number;
+  name: string;
+  bpm: number;
+  key: string;
+}
+
 type Check = {
   label: string;
   detail: string;
@@ -81,6 +95,7 @@ export default function App(): React.JSX.Element {
   const [importState, setImportState] = useState<ImportState>({ status: "loading" });
   const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
+  const [crateList, setCrateList] = useState<CrateTrack[]>([]);
 
   // On startup, show whatever was already imported and saved, rather than
   // looking empty until the DJ re-imports a file that's genuinely already
@@ -207,8 +222,8 @@ export default function App(): React.JSX.Element {
 
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
       <TrackCheatScreen sharedSession={sharedSession} />
-      <CrateCheatScreen sharedSession={sharedSession} />
-      <PlaylistCheatScreen />
+      <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} />
+      <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />
       <SettingsScreen sharedSession={sharedSession} />
 
       <PreferencesSection />

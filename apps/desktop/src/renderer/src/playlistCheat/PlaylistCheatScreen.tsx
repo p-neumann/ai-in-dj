@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { matchPlaylistFromPlainText } from "./matchPlaylist.ts";
 import type { MatchedResult } from "./matchPlaylist.ts";
+import type { CrateTrack } from "../App";
 
 const RESULT_COUNTS = [1, 3, 5] as const;
 
@@ -27,7 +28,16 @@ type ResultState =
   | { status: "ready"; library: CcdjLibraryRow[] }
   | { status: "matched"; library: CcdjLibraryRow[]; results: MatchedResult[] };
 
-export default function PlaylistCheatScreen(): React.JSX.Element {
+interface PlaylistCheatScreenProps {
+  // docs/decisions/0019: source's "Add To Crate ->" (spotifyToPlaylist) -
+  // adds whichever matches are currently selected into Crate Cheat's
+  // own list, without erasing what's already there. CLAUDE.md never
+  // documented this feature; confirmed directly against the reference
+  // source instead (docs/QUESTIONS.md).
+  onAddToCrate: (tracks: CrateTrack[]) => void;
+}
+
+export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScreenProps): React.JSX.Element {
   const [plainText, setPlainText] = useState("");
   const [resultCount, setResultCount] = useState<number>(3);
   const [state, setState] = useState<ResultState>({ status: "loadingLibrary" });
@@ -59,6 +69,22 @@ export default function PlaylistCheatScreen(): React.JSX.Element {
 
   function selectedCount(): number {
     return Object.keys(selected).length;
+  }
+
+  // Source: spotifyToPlaylist - collects the currently-selected match
+  // per song and hands them to Crate Cheat's list. No dedup here either
+  // (matching the source exactly) - adding the same track twice, on
+  // purpose or by accident, is allowed, same as his app.
+  function handleAddToCrate(): void {
+    const tracks: CrateTrack[] = [];
+    results.forEach((r, ri) => {
+      const mi = selected[ri];
+      if (mi === undefined) return;
+      const m = r.matches[mi];
+      if (!m) return;
+      tracks.push({ trackId: m.id, name: m.displayName, bpm: m.bpm, key: m.key });
+    });
+    if (tracks.length) onAddToCrate(tracks);
   }
 
   return (
@@ -111,6 +137,9 @@ export default function PlaylistCheatScreen(): React.JSX.Element {
             {results.filter((r) => r.matches.length > 0).length} of {results.length} matched &middot;{" "}
             {selectedCount()} selected
           </p>
+          <button onClick={handleAddToCrate} disabled={selectedCount() === 0}>
+            Add To Crate →
+          </button>
           <ol style={{ paddingLeft: "1.2rem" }}>
             {results.map((r, ri) => (
               <li key={ri} style={{ marginBottom: "0.5rem" }}>
