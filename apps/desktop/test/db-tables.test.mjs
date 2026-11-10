@@ -21,6 +21,7 @@ import {
   countTracks,
   getAllTracksForLibrary,
   getTrackLocation,
+  getTracksByIds,
   replaceAllTracks
 } from "../src/main/db/tracks.ts";
 
@@ -282,6 +283,29 @@ test("tracks: a repeated location keeps the first row and is reported, not a cra
   assert.equal(countTracks(db), 2);
   const a = getAllTracksForLibrary(db).find((r) => r.id === trackId("/Volumes/DJ/a.mp4"));
   assert.equal(a.title, "first");
+});
+
+// getTracksByIds tests adopted from Ranjish's tracks.test.js (step 5, piece 8:
+// Export), with string IDs.
+test("tracks: getTracksByIds returns export fields for known IDs and skips unknown ones", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4"), track("/Volumes/DJ/b.mp4", { bpm: null })]);
+  const a = trackId("/Volumes/DJ/a.mp4");
+  const b = trackId("/Volumes/DJ/b.mp4");
+
+  const rows = getTracksByIds(db, [a, "t_0000000000000000", b]);
+
+  assert.equal(rows.length, 2);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  assert.deepEqual(byId.get(a), {
+    id: a, displayName: "a", artist: "Rihanna", bpm: 88, key: "8A", location: "/Volumes/DJ/a.mp4"
+  });
+  assert.equal(byId.get(b).bpm, null);
+});
+
+test("tracks: getTracksByIds with no IDs returns an empty list", async (t) => {
+  const db = await freshDb(t);
+  assert.deepEqual(getTracksByIds(db, []), []);
 });
 
 test("history: entries without an id can still be saved", async (t) => {

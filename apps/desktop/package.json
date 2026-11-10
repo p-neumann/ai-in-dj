@@ -9,7 +9,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "node --test --test-concurrency=1",
+    "test": "node --experimental-strip-types --test --test-concurrency=1",
     "rebuild-native": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
