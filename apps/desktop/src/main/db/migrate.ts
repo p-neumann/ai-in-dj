@@ -30,7 +30,7 @@ export type MigrateResult =
 
 export interface MigrateOptions {
   // Replaceable so tests can force a backup failure.
-  backup?: (source: Database, dbPath: string, version: number) => Promise<string>;
+  backup?: (source: Database.Database, dbPath: string, version: number) => Promise<string>;
 }
 
 export function assertValidMigrations(migrations: readonly Migration[]): void {

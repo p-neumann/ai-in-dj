@@ -24,7 +24,7 @@ function entryIdOf(entry: unknown): string | null {
   return null;
 }
 
-export function appendHistoryEntry(db: Database, entry: unknown): void {
+export function appendHistoryEntry(db: Database.Database, entry: unknown): void {
   db.prepare("INSERT INTO history (timestamp, entry, entry_id) VALUES (?, ?, ?)").run(
     Date.now(),
     JSON.stringify(entry),
@@ -32,7 +32,7 @@ export function appendHistoryEntry(db: Database, entry: unknown): void {
   );
 }
 
-export function listHistory(db: Database, limit: number): HistoryRow[] {
+export function listHistory(db: Database.Database, limit: number): HistoryRow[] {
   const rows = db
     .prepare("SELECT id, timestamp, entry FROM history ORDER BY id DESC LIMIT ?")
     .all(limit) as Array<{ id: number; timestamp: number; entry: string }>;
@@ -41,7 +41,7 @@ export function listHistory(db: Database, limit: number): HistoryRow[] {
 
 // Replaces the saved entry whose own id is entryId. Returns false, and
 // changes nothing, if there is none: an update never creates an entry.
-export function updateHistoryEntry(db: Database, entryId: string, entry: unknown): boolean {
+export function updateHistoryEntry(db: Database.Database, entryId: string, entry: unknown): boolean {
   const result = db
     .prepare("UPDATE history SET entry = ? WHERE entry_id = ?")
     .run(JSON.stringify(entry), entryId);

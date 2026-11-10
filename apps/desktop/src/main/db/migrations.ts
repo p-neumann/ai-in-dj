@@ -16,7 +16,7 @@ import { VERSION_TABLE } from "./schema.ts";
 export interface Migration {
   readonly version: number;
   readonly name: string;
-  up(db: Database): void;
+  up(db: Database.Database): void;
 }
 
 export const MIGRATIONS: readonly Migration[] = [

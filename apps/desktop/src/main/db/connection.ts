@@ -16,7 +16,7 @@ export const BUSY_TIMEOUT_MS = 5000;
 // (design note section 8), so they are applied on every open. Call before
 // any transaction: SQLite refuses to change synchronous inside one, and
 // foreign_keys is a no-op there.
-export function applyConnectionSettings(db: Database): void {
+export function applyConnectionSettings(db: Database.Database): void {
   db.pragma("synchronous = FULL");
   db.pragma("foreign_keys = ON");
 }
@@ -24,7 +24,7 @@ export function applyConnectionSettings(db: Database): void {
 // Opens (or creates) the database at `path` with WAL, synchronous=FULL and
 // foreign keys on. Throws if any setting cannot be applied; the connection is
 // closed first, so nothing is left holding the file.
-export function openDatabase(path: string): Database {
+export function openDatabase(path: string): Database.Database {
   const db = new Database(path, { timeout: BUSY_TIMEOUT_MS });
   try {
     const mode = db.pragma("journal_mode = WAL", { simple: true });

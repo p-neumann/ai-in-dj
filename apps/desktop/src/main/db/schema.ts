@@ -6,7 +6,7 @@ import type Database from "better-sqlite3";
 // One version for the whole database file (docs/decisions/0006).
 export const VERSION_TABLE = "schema_migrations";
 
-export function userTableNames(db: Database): string[] {
+export function userTableNames(db: Database.Database): string[] {
   const rows = db
     .prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -16,7 +16,7 @@ export function userTableNames(db: Database): string[] {
 }
 
 // 0 means "no migrations applied": a new file, or one CCDJ never migrated.
-export function readSchemaVersion(db: Database): number {
+export function readSchemaVersion(db: Database.Database): number {
   if (!userTableNames(db).includes(VERSION_TABLE)) return 0;
   const row = db.prepare(`SELECT MAX(version) AS v FROM ${VERSION_TABLE}`).get() as {
     v: number | null;
@@ -24,7 +24,7 @@ export function readSchemaVersion(db: Database): number {
   return row.v ?? 0;
 }
 
-export function tableRowCounts(db: Database): Record<string, number> {
+export function tableRowCounts(db: Database.Database): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const name of userTableNames(db)) {
     const quoted = `"${name.replace(/"/g, '""')}"`;

@@ -28,7 +28,7 @@ export function backupPathFor(dbPath: string, version: number): string {
 // by the fresher one. Throws if the backup cannot be made or verified; the
 // caller must not migrate in that case.
 export async function createVerifiedBackup(
-  source: Database,
+  source: Database.Database,
   dbPath: string,
   version: number
 ): Promise<string> {

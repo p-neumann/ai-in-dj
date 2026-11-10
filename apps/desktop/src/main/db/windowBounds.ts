@@ -11,14 +11,14 @@ export interface WindowBounds {
   height: number;
 }
 
-export function getWindowBounds(db: Database): WindowBounds | null {
+export function getWindowBounds(db: Database.Database): WindowBounds | null {
   const row = db.prepare("SELECT x, y, width, height FROM window_bounds WHERE id = 1").get() as
     | WindowBounds
     | undefined;
   return row ?? null;
 }
 
-export function saveWindowBounds(db: Database, bounds: WindowBounds): void {
+export function saveWindowBounds(db: Database.Database, bounds: WindowBounds): void {
   db.prepare(
     `INSERT INTO window_bounds (id, x, y, width, height) VALUES (1, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET x = excluded.x, y = excluded.y, width = excluded.width, height = excluded.height`

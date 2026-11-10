@@ -31,7 +31,7 @@ export interface ReplaceResult {
 // A full import replaces the whole table in one transaction (CLAUDE.md 6.2:
 // writes are atomic). IDs come from locations, so a re-import of the same
 // files gives the same IDs.
-export function replaceAllTracks(db: Database, tracks: TrackInput[]): ReplaceResult {
+export function replaceAllTracks(db: Database.Database, tracks: TrackInput[]): ReplaceResult {
   const insert = db.prepare(`
     INSERT INTO tracks (id, displayName, artist, title, bpm, key, genre, year, playcount, durationSec, location, extra)
     VALUES (@id, @displayName, @artist, @title, @bpm, @key, @genre, @year, @playcount, @durationSec, @location, @extra)
@@ -56,12 +56,12 @@ export function replaceAllTracks(db: Database, tracks: TrackInput[]): ReplaceRes
   return replaceAll(tracks);
 }
 
-export function countTracks(db: Database): number {
+export function countTracks(db: Database.Database): number {
   const row = db.prepare("SELECT COUNT(*) AS n FROM tracks").get() as { n: number };
   return row.n;
 }
 
-export function getSampleTrackNames(db: Database, limit: number): string[] {
+export function getSampleTrackNames(db: Database.Database, limit: number): string[] {
   const rows = db.prepare("SELECT displayName FROM tracks LIMIT ?").all(limit) as Array<{
     displayName: string;
   }>;
@@ -73,17 +73,38 @@ export interface SampleTrack {
   displayName: string;
 }
 
-export function getSampleTracks(db: Database, limit: number): SampleTrack[] {
+export function getSampleTracks(db: Database.Database, limit: number): SampleTrack[] {
   return db.prepare("SELECT id, displayName FROM tracks LIMIT ?").all(limit) as SampleTrack[];
 }
 
 // The renderer only ever names a trackId; the real path is looked up here, in
 // the main process (CLAUDE.md 7.5). null for an unknown ID, never a guess.
-export function getTrackLocation(db: Database, id: string): string | null {
+export function getTrackLocation(db: Database.Database, id: string): string | null {
   const row = db.prepare("SELECT location FROM tracks WHERE id = ?").get(id) as
     | { location: string }
     | undefined;
   return row ? row.location : null;
+}
+
+export interface ExportTrackRow {
+  id: string;
+  displayName: string;
+  artist: string;
+  bpm: number | null;
+  key: string;
+  location: string;
+}
+
+// Adopted from Ranjish's branch (step 5, piece 8: Export), with string IDs.
+// Crate Cheat's export needs each track's real location, looked up here by
+// trackId like getTrackLocation. Unknown IDs are skipped. SQL's IN() does not
+// keep order, so the caller re-orders by its own ID list.
+export function getTracksByIds(db: Database.Database, trackIds: string[]): ExportTrackRow[] {
+  if (trackIds.length === 0) return [];
+  const placeholders = trackIds.map(() => "?").join(",");
+  return db
+    .prepare(`SELECT id, displayName, artist, bpm, key, location FROM tracks WHERE id IN (${placeholders})`)
+    .all(...trackIds) as ExportTrackRow[];
 }
 
 export interface LibraryRow {
@@ -100,7 +121,7 @@ export interface LibraryRow {
 
 // The Library screen's rows, and the shape synced to the server: no location
 // or extra, so no file path ever leaves this process (CLAUDE.md 5.4).
-export function getAllTracksForLibrary(db: Database): LibraryRow[] {
+export function getAllTracksForLibrary(db: Database.Database): LibraryRow[] {
   return db
     .prepare("SELECT id, displayName, artist, title, bpm, key, genre, year, playcount FROM tracks")
     .all() as LibraryRow[];

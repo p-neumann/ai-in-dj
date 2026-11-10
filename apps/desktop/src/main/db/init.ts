@@ -25,7 +25,7 @@ export const DB_FILE_NAME = "ccdj-db.sqlite";
 export type InitResult =
   | {
       status: "ready";
-      db: Database;
+      db: Database.Database;
       path: string;
       migration: Extract<MigrateResult, { status: "migrated" | "upToDate" }>;
       sqliteVersion: string;
@@ -62,7 +62,7 @@ export async function initDatabase(
     return { status: migration.status, path, migration };
   }
 
-  let db: Database | undefined;
+  let db: Database.Database | undefined;
   try {
     db = openDatabase(path);
     const row = db.prepare("SELECT sqlite_version() AS v").get() as { v: string };
