@@ -262,6 +262,10 @@ export function registerWindowIpc(): void {
     window?.setAlwaysOnTop(!!flag);
     return window?.isAlwaysOnTop() ?? false;
   });
+  // Step 5, piece 11 (Account tab footer - "v<N> · Cheat Code DJ",
+  // same spot as source's {APP_VERSION}). This app's own version, not
+  // the source's literal "v1.0.22016" string.
+  ipcMain.handle("app:getVersion", () => app.getVersion());
 }
 
 // Step 5, piece 1 - the pipe to the real backend. No AI call lives here;

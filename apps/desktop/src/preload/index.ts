@@ -181,6 +181,7 @@ const api = {
   showInFinder: (trackId: number): Promise<ShowInFinderResult> =>
     ipcRenderer.invoke("files:showInFinder", trackId),
   setAlwaysOnTop: (flag: boolean): Promise<boolean> => ipcRenderer.invoke("window:setAlwaysOnTop", flag),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke("app:getVersion"),
   // Step 5, piece 1 - the pipe to the real backend. The renderer never
   // calls the backend itself; it only ever asks main to do it.
   backend: {

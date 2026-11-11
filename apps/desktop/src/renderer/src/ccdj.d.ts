@@ -173,6 +173,7 @@ interface Window {
     };
     showInFinder: (trackId: number) => Promise<CcdjShowInFinderResult>;
     setAlwaysOnTop: (flag: boolean) => Promise<boolean>;
+    getAppVersion: () => Promise<string>;
     backend: {
       checkHealth: () => Promise<CcdjBackendHealthResult>;
       createSession: () => Promise<CcdjBackendSessionResult>;
