@@ -97,6 +97,13 @@ export default function App(): React.JSX.Element {
   const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
   const [crateList, setCrateList] = useState<CrateTrack[]>([]);
+  // Step 5, piece 10 (Gig Mode). Source: tab bar disappears while
+  // gigMode&&tab===0 (reference, line 5635) - this app has no tab bar
+  // yet (everything is stacked on one page), so the honest equivalent
+  // is hiding every OTHER section instead, leaving only Track Cheat
+  // (in its own compact layout) on screen. Lives here, not inside
+  // TrackCheatScreen, because only App.tsx can hide its siblings.
+  const [gigMode, setGigMode] = useState(false);
 
   // On startup, show whatever was already imported and saved, rather than
   // looking empty until the DJ re-imports a file that's genuinely already
@@ -150,6 +157,8 @@ export default function App(): React.JSX.Element {
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 640 }}>
+      {!gigMode && (
+        <>
       <p style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#888", fontSize: 12 }}>
         CheatCode DJ &middot; Phase 5
       </p>
@@ -223,7 +232,13 @@ export default function App(): React.JSX.Element {
 
       <LibraryScreen refreshSignal={libraryRefreshSignal} />
       <DuplicateFinderScreen refreshSignal={libraryRefreshSignal} />
-      <TrackCheatScreen sharedSession={sharedSession} />
+        </>
+      )}
+
+      <TrackCheatScreen sharedSession={sharedSession} gigMode={gigMode} setGigMode={setGigMode} />
+
+      {!gigMode && (
+        <>
       <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} />
       <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />
       <SettingsScreen sharedSession={sharedSession} />
@@ -232,6 +247,8 @@ export default function App(): React.JSX.Element {
       <HistorySection />
       <AlwaysOnTopSection />
       <BackendConnectionSection />
+        </>
+      )}
     </main>
   );
 }

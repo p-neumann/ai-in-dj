@@ -37,9 +37,15 @@ interface SessionState {
 
 interface TrackCheatScreenProps {
   sharedSession: SharedSession | null;
+  // Step 5, piece 10 (Gig Mode). State lives in App.tsx, not here -
+  // only App.tsx can hide this screen's siblings while Gig Mode is on.
+  // This screen just reads it to pick a layout and renders the
+  // Enter/Exit button that flips it.
+  gigMode: boolean;
+  setGigMode: (next: boolean) => void;
 }
 
-export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProps): React.JSX.Element {
+export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode }: TrackCheatScreenProps): React.JSX.Element {
   const [allTracks, setAllTracks] = useState<CcdjLibraryRow[] | null>(null);
   const [seedSearch, setSeedSearch] = useState("");
   const [seedTrackId, setSeedTrackId] = useState<number | null>(null);
@@ -213,7 +219,42 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
   }
 
   return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
+    <section
+      style={{
+        border: "2px solid #888",
+        borderRadius: 8,
+        padding: gigMode ? "0.5rem" : "1rem",
+        marginTop: gigMode ? 0 : "1rem"
+      }}
+    >
+      {/* Step 5, piece 10 (Gig Mode). Source: the "🎤 Gig Mode" button
+          (reference line 5725) lives inside Track Cheat's own body,
+          not Settings - confirmed directly, not assumed. Gated on
+          sharedSession the way the source gates its button on the
+          library being loaded (!library.length) - the equivalent
+          "nothing to gig with yet" condition in this port. */}
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: gigMode ? "0.4rem" : "0.75rem" }}>
+        {gigMode ? (
+          <button
+            onClick={() => setGigMode(false)}
+            style={{ fontSize: 11, padding: "4px 16px", border: "1px solid #c62828", borderRadius: 8, color: "#c62828", background: "transparent" }}
+          >
+            ✕ Exit Gig Mode
+          </button>
+        ) : (
+          sharedSession && (
+            <button
+              onClick={() => setGigMode(true)}
+              style={{ fontSize: 11, padding: "4px 16px", border: "1px solid #888", borderRadius: 8, background: "transparent" }}
+            >
+              🎤 Gig Mode
+            </button>
+          )
+        )}
+      </div>
+
+      {!gigMode && (
+        <>
       <h2 style={{ marginTop: 0 }}>Step 5, piece 3+4: Track Cheat</h2>
       <p style={{ fontSize: 13, color: "#666" }}>
         All the recommendation logic (candidate selection, ranking, fallback chain, chain/bridge/drift derivation,
@@ -238,6 +279,8 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
           <option value="low">low</option>
         </select>
       </label>
+        </>
+      )}
 
       <div>
         <label>
@@ -278,7 +321,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
         </ul>
       )}
 
-      <div style={{ marginTop: "0.75rem" }}>
+      <div style={{ marginTop: gigMode ? "0.3rem" : "0.75rem" }}>
         <label>
           Vibe: {vibe} {vibeLabel && <b>- {vibeLabel[0]}</b>}
           <input
@@ -290,10 +333,10 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
             style={{ width: "100%" }}
           />
         </label>
-        {vibeLabel && <p style={{ fontSize: 12, color: "#666", margin: "0.2rem 0" }}>{vibeLabel[1]}</p>}
+        {!gigMode && vibeLabel && <p style={{ fontSize: 12, color: "#666", margin: "0.2rem 0" }}>{vibeLabel[1]}</p>}
       </div>
 
-      <div style={{ marginTop: "0.5rem" }}>
+      <div style={{ marginTop: gigMode ? "0.2rem" : "0.5rem" }}>
         <label>
           Energy: {energy}
           <input
@@ -307,7 +350,7 @@ export default function TrackCheatScreen({ sharedSession }: TrackCheatScreenProp
         </label>
       </div>
 
-      <div style={{ marginTop: "0.5rem" }}>
+      <div style={{ marginTop: gigMode ? "0.2rem" : "0.5rem" }}>
         <label>
           Play-count mode:{" "}
           <select value={playCountMode} onChange={(e) => setPlayCountMode(e.target.value)}>
