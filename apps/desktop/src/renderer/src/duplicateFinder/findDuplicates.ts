@@ -21,9 +21,9 @@
 // still can't run away.
 
 export interface DuplicateFinderTrack {
-  id: number;
+  id: string;
   displayName: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   playcount: number | null;
   durationSec: number | null;

@@ -45,7 +45,7 @@ export default function DuplicateFinderScreen({ refreshSignal }: { refreshSignal
   // CCDJ, never written to the database, and never touches the real
   // file. Keeps the real row (not just the id) so the Restore list
   // below can show what it's restoring.
-  const [sessionRemoved, setSessionRemoved] = useState<Map<number, CcdjDuplicateScanRow>>(new Map());
+  const [sessionRemoved, setSessionRemoved] = useState<Map<string, CcdjDuplicateScanRow>>(new Map());
   const [permanentBusy, setPermanentBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -107,7 +107,7 @@ export default function DuplicateFinderScreen({ refreshSignal }: { refreshSignal
     );
   }
 
-  function handleRestore(id: number): void {
+  function handleRestore(id: string): void {
     setSessionRemoved((prev) => {
       const next = new Map(prev);
       next.delete(id);

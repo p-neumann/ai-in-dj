@@ -111,7 +111,7 @@ export function registerLibraryIpc(db: Database.Database): void {
   // state). A real row delete, so the same staleness rule as a fresh
   // import applies: the backend's cached revision now describes a
   // library that no longer exists.
-  ipcMain.handle("library:permanentlyDeleteTracks", (_event, trackIds: number[]) => {
+  ipcMain.handle("library:permanentlyDeleteTracks", (_event, trackIds: string[]) => {
     const deleted = deleteTracksByIds(db, trackIds);
     if (deleted > 0) cachedLibraryRevision = null;
     return { deleted };

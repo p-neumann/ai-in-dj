@@ -28,7 +28,7 @@ export function handleSort(current: SortState, field: SortField): SortState {
 
 export interface Sortable {
   name: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
 }
 

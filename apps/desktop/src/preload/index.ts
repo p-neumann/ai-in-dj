@@ -63,9 +63,9 @@ export interface LibraryRow {
 
 // Step 5, piece 9 (Duplicate Finder).
 export interface DuplicateScanRow {
-  id: number;
+  id: string;
   displayName: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   playcount: number | null;
   durationSec: number | null;
@@ -166,7 +166,7 @@ const api = {
     getTracksForDuplicateScan: (): Promise<DuplicateScanRow[]> => ipcRenderer.invoke("library:getTracksForDuplicateScan"),
     // The deliberate "Apply Permanently" action only - never called by
     // the default, session-only "Send to Recycle Bin" path.
-    permanentlyDeleteTracks: (trackIds: number[]): Promise<PermanentlyDeleteResult> =>
+    permanentlyDeleteTracks: (trackIds: string[]): Promise<PermanentlyDeleteResult> =>
       ipcRenderer.invoke("library:permanentlyDeleteTracks", trackIds)
   },
   prefs: {

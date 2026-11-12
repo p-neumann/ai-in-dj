@@ -59,9 +59,9 @@ interface CcdjLibraryRow {
 
 // Step 5, piece 9 (Duplicate Finder).
 interface CcdjDuplicateScanRow {
-  id: number;
+  id: string;
   displayName: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   playcount: number | null;
   durationSec: number | null;
@@ -161,7 +161,7 @@ interface Window {
       getStatus: () => Promise<CcdjLibraryStatus>;
       getAllTracks: () => Promise<CcdjLibraryRow[]>;
       getTracksForDuplicateScan: () => Promise<CcdjDuplicateScanRow[]>;
-      permanentlyDeleteTracks: (trackIds: number[]) => Promise<CcdjPermanentlyDeleteResult>;
+      permanentlyDeleteTracks: (trackIds: string[]) => Promise<CcdjPermanentlyDeleteResult>;
     };
     prefs: {
       get: (key: string) => Promise<string | null>;

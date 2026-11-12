@@ -29,9 +29,9 @@ import type { SortField, SortDir } from "./sortResults";
 import type { DerivedTheme } from "../theme/deriveTheme";
 
 export interface ResultRowTrack {
-  trackId: number;
+  trackId: string;
   name: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   camp: string | null;
   lane: string | null;
@@ -68,8 +68,8 @@ export interface ResultRowProps {
   theme: DerivedTheme;
   rowBg: string;
   disabled: boolean;
-  onVote: (trackId: number, value: "up" | "down") => void;
-  onDaisyChain: (trackId: number) => void;
+  onVote: (trackId: string, value: "up" | "down") => void;
+  onDaisyChain: (trackId: string) => void;
 }
 
 export function ResultRow({ t, vote, theme, rowBg, disabled, onVote, onDaisyChain }: ResultRowProps): React.JSX.Element {
