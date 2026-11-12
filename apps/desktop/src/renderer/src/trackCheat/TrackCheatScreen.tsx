@@ -47,6 +47,7 @@ import { ResultRow, ResHeader } from "../shared/ResultRow";
 import { applySort, handleSort, DEFAULT_SORT_STATE, type SortField, type SortState } from "../shared/sortResults";
 import { cardStyle, lblStyle, inputStyle, searchInputStyle, goBtnStyle, dropZoneStyle, WHITE, GRAY, bpmBorder, glowSweepStyle } from "../shared/controlStyles";
 import KeyPill from "../shared/KeyPill";
+import EmptyLib from "../shared/EmptyLib";
 
 type ResultState =
   | { status: "idle" }
@@ -67,9 +68,13 @@ interface TrackCheatScreenProps {
   gigMode: boolean;
   setGigMode: (next: boolean) => void;
   theme: DerivedTheme;
+  // Source: {!library.length?<EmptyLib/>:(...)} (line 5722) replaces
+  // the WHOLE tab body, including the Gig Mode button itself, whenever
+  // the library is empty - ported the same way here.
+  onGoToLibrary: () => void;
 }
 
-export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, theme }: TrackCheatScreenProps): React.JSX.Element {
+export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, theme, onGoToLibrary }: TrackCheatScreenProps): React.JSX.Element {
   const [allTracks, setAllTracks] = useState<CcdjLibraryRow[] | null>(null);
   const [seedSearch, setSeedSearch] = useState("");
   const [seedTrackId, setSeedTrackId] = useState<number | null>(null);
@@ -316,6 +321,13 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
     if (!track || !deckWatchOn) return;
     setSeedTo(track.id);
     void recommendForSeed(track.id, "external");
+  }
+
+  if (allTracks === null) {
+    return <p style={{ color: GRAY }}>Loading library...</p>;
+  }
+  if (allTracks.length === 0) {
+    return <EmptyLib theme={theme} onGoToLibrary={onGoToLibrary} />;
   }
 
   return (
