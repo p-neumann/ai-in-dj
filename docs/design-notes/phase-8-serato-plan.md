@@ -5,8 +5,9 @@
 
 ## The short version
 
-- **Hannah** builds the Serato code in the desktop app, on Windows (Serato DJ runs there; the spike was done there).
-- **Ranjish** owns the Mac side: re-runs the spike checks on macOS (Phase 8a) and verifies each feature on a real Mac.
+- **Hannah** builds the Serato code in the desktop app, on Windows (Serato DJ runs there; the spike was done there), plus 8f and 8g, since Ranjish is still finishing Phase 5.
+- **Ranjish** owns the Mac side. **His main Phase 8 job is 8a**: re-running the spike checks on macOS with the runbook below. After that he verifies each feature on a real Mac.
+- If Hannah gets a Mac, she verifies too, so Mac verification becomes shared.
 - Two-way drag is shared, because it is half app code and half macOS behaviour.
 
 Goal: no one builds the same thing twice, and nothing is called done until it works on a Mac (CLAUDE.md §1.5, §8.1).
@@ -26,13 +27,13 @@ If Mike's version has no SQLite library (spike finding), the Deck Watcher approa
 
 | Sub-phase (CLAUDE.md §9) | What | Builds | Verifies on Mac |
 |---|---|---|---|
-| **8a** | Re-run spike checks 1–4 on macOS with Mike's Serato version | — | **Ranjish** |
-| **8b** | Find and import the Serato library; "Can't find my software" fallback | **Hannah** | Ranjish |
-| **8c** | Drag out to Serato, drops in from Serato, reveal in Finder, always on top, window bounds | **Together** (Ranjish already has reveal / always on top / bounds) | Ranjish |
-| **8d** | Deck Watcher + Auto Seed | **Hannah** | Ranjish |
-| **8e** | Serato `.crate` export (back up `Subcrates` first) | **Hannah** | Ranjish |
-| **8f** | Preview protocol, real trash for duplicates, tag write/restore | To decide | Ranjish |
-| **8g** | Microphone, themed logos | To decide | Ranjish |
+| **8a** | Re-run spike checks 1–4 on macOS (runbook below: Serato DJ Lite first, Mike's Pro 5.0.0 to confirm later) | — | **Ranjish** (main job) |
+| **8b** | Find and import the Serato library; "Can't find my software" fallback | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
+| **8c** | Drag out to Serato, drops in from Serato, reveal in Finder, always on top, window bounds | **Together** (Ranjish already has reveal / always on top / bounds) | Ranjish (+ Hannah when she gets a Mac) |
+| **8d** | Deck Watcher + Auto Seed | **Hannah** | Ranjish (+ Hannah if she gets a Mac) |
+| **8e** | Serato `.crate` export (back up `Subcrates` first) | **Hannah** | Ranjish (+ Hannah if she gets a Mac) |
+| **8f** | Preview protocol, real trash for duplicates, tag write/restore | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
+| **8g** | Microphone, themed logos (logo assets from Mike; voice input method is decision D5) | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
 
 ## What the spike already tells us (Windows / Lite; provisional until 8a)
 
@@ -62,7 +63,7 @@ Use the spike's method: snapshot files with true size + SHA-256, do one action i
 
 Step-by-step prompts to paste into Claude Code on the Mac, one at a time. Each prompt does **one** check and stops; paste the next only after you have looked at the result. Plan for about 3–4 hours in total, spread over sessions if needed.
 
-**Why Lite first.** Lite is free; Mike's Pro 5.0.0 is paid. A Lite run on macOS answers the macOS questions (file locations, drag pasteboard, crate behaviour) now. Everything it finds is **provisional for Pro**: edition and version still differ, so record "Lite x.y on macOS 14/15" next to every result, and keep the Pro differences as an open item (Mike's own Mac, or a Pro trial if Serato offers one: check, don't assume).
+**Why Lite first.** Lite is free; Mike's Pro 5.0.0 is paid. A Lite run on macOS answers the macOS questions (file locations, drag pasteboard, crate behaviour) now. Everything it finds is **provisional for Pro**: edition and version still differ, so record "Lite x.y on macOS 14/15" next to every result, and keep the Pro differences as an open item 
 
 **Before you start (by hand, no Claude):**
 1. Install **Serato DJ Lite** (free) from serato.com. Open it once with no controller (it should offer a practice mode; note what it actually says). Note the exact version from Serato's About screen and your macOS version (Apple menu → About This Mac).
@@ -202,6 +203,5 @@ until I say so.
 
 ## Questions for Ranjish
 
-- Does this split work for you? Anything you'd rather own?
-- Mike's version is known (Pro 5.0.0 on Sonoma 14.6.1). Can you run the Lite runbook above on your Mac this week?
-- 8f and 8g: do you want them, or split later?
+- Mike's version is known (Pro 5.0.0 on Sonoma 14.6.1). Can you run the Lite runbook above on your Mac this week? It's your main Phase 8 job.
+
