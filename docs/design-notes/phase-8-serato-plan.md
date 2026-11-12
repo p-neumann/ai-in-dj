@@ -30,8 +30,8 @@ If Mike's version has no SQLite library (spike finding), the Deck Watcher approa
 | **8a** | Re-run spike checks 1–4 on macOS (runbook below: Serato DJ Lite first, Mike's Pro 5.0.0 to confirm later) | — | **Ranjish** (main job) |
 | **8b** | Find and import the Serato library; "Can't find my software" fallback | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
 | **8c** | Drag out to Serato, drops in from Serato, reveal in Finder, always on top, window bounds | **Together** (Ranjish already has reveal / always on top / bounds) | Ranjish (+ Hannah when she gets a Mac) |
-| **8d** | Deck Watcher + Auto Seed | **Hannah** | Ranjish (+ Hannah if she gets a Mac) |
-| **8e** | Serato `.crate` export (back up `Subcrates` first) | **Hannah** | Ranjish (+ Hannah if she gets a Mac) |
+| **8d** | Deck Watcher + Auto Seed | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
+| **8e** | Serato `.crate` export (back up `Subcrates` first) | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
 | **8f** | Preview protocol, real trash for duplicates, tag write/restore | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
 | **8g** | Microphone, themed logos (logo assets from Mike; voice input method is decision D5) | **Hannah** | Ranjish (+ Hannah when she gets a Mac) |
 
@@ -63,7 +63,7 @@ Use the spike's method: snapshot files with true size + SHA-256, do one action i
 
 Step-by-step prompts to paste into Claude Code on the Mac, one at a time. Each prompt does **one** check and stops; paste the next only after you have looked at the result. Plan for about 3–4 hours in total, spread over sessions if needed.
 
-**Why Lite first.** Lite is free; Mike's Pro 5.0.0 is paid. A Lite run on macOS answers the macOS questions (file locations, drag pasteboard, crate behaviour) now. Everything it finds is **provisional for Pro**: edition and version still differ, so record "Lite x.y on macOS 14/15" next to every result, and keep the Pro differences as an open item 
+**Why Lite first.** Lite is free; Mike's Pro 5.0.0 is paid. A Lite run on macOS answers the macOS questions (file locations, drag pasteboard, crate behaviour) now. Everything it finds is **provisional for Pro**: edition and version still differ, so record "Lite x.y on macOS 14/15" next to every result, and keep the Pro differences as an open item.
 
 **Before you start (by hand, no Claude):**
 1. Install **Serato DJ Lite** (free) from serato.com. Open it once with no controller (it should offer a practice mode; note what it actually says). Note the exact version from Serato's About screen and your macOS version (Apple menu → About This Mac).
