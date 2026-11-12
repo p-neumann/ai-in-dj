@@ -14,6 +14,7 @@ import type { ThemePrefs } from "../settings/theme.ts";
 export interface DerivedTheme {
   accent: string;
   bg: string;
+  lightMode: boolean;
   ruleColor: string;
   accentAlpha: (a: number) => string;
   ia: (a: number) => string;
@@ -34,6 +35,7 @@ export function deriveTheme(theme: ThemePrefs): DerivedTheme {
   return {
     accent,
     bg,
+    lightMode: theme.lightMode,
     ruleColor,
     accentAlpha: makeAlpha(accent),
     ia: makeAlpha(ruleColor),

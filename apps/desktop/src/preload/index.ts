@@ -194,6 +194,7 @@ const api = {
       vibe: number;
       energy: number;
       playCountMode: string;
+      vibePromptText?: string;
       sessionId?: string;
       clientSeq?: number;
       expectedStateVersion?: number;

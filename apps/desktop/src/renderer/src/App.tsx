@@ -197,7 +197,7 @@ export default function App(): React.JSX.Element {
       />
 
       <main style={{ padding: "1.5rem", maxWidth: 720, margin: "0 auto" }}>
-        {tab === 0 && <TrackCheatScreen sharedSession={sharedSession} gigMode={gigMode} setGigMode={setGigMode} />}
+        {tab === 0 && <TrackCheatScreen sharedSession={sharedSession} gigMode={gigMode} setGigMode={setGigMode} theme={derived} />}
 
         {tab === 1 && <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />}
 
