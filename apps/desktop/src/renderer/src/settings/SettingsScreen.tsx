@@ -1,34 +1,39 @@
 // Phase 5, step 5 piece 7 - Settings (consolidated).
 //
-// docs/decisions/0016: Mike's real app spreads this across four separate
-// popups (Settings: theme/referral; Style Profile & Play Lists; History;
-// Report a Problem), each opened from an icon in a header bar that sits
-// on every tab. That header doesn't exist in this app yet - nothing
-// built so far has one - so everything lives in one screen for now, in
-// the same vertical stack as every other piece. Piece 8 (a real shared
-// header) may split this back into Mike's own popup layout later; this
-// is a packaging difference, not a behavior one.
+// Mike's real app spreads this across SIX separate popups (CLAUDE2.md's
+// own correction: Settings theme/referral; Style Profile & Play Lists;
+// History; a startup Preferences-active reminder; Error Report; Rating
+// + Post-Session Nudge), each opened from an icon in a header bar that
+// sits on every tab. Piece 11 built that real header - as a Stage 1
+// bridge, its style-profile/history/settings-gear icons all open THIS
+// one screen for now, unchanged, rather than the real split. Piece 13
+// does that split; this comment stays accurate until then.
+//
+// Always On Top moved to the header's own pin icon (piece 11) - the
+// header is the only place it lives now, matching the source exactly
+// (it was never a Settings-popup control in his app either).
 //
 // Left out on purpose, per CLAUDE.md and docs/QUESTIONS.md: login,
 // pricing/Manage Subscription/referral code (all Phase 6 or blocked on
-// D2), themed logo (blocked - assets requested from Mike), the rating
-// prompt (tied to Track Cheat usage, not a setting), DEBUG_MODE (not a
-// real toggle in the source), and Gig Mode (lives in Track Cheat's own
-// screen).
+// D2), the rating prompt (tied to Track Cheat usage, not a setting),
+// DEBUG_MODE (not a real toggle in the source).
 
 import { useEffect, useState } from "react";
 import { savePreferences } from "../api/backendClient";
 import type { SharedSession } from "../App";
-import { SWATCHES_ACCENT, SWATCHES_BG, DEFAULT_THEME, parseThemePrefs, serializeThemePrefs, type ThemePrefs } from "./theme";
+import { SWATCHES_ACCENT, SWATCHES_BG, type ThemePrefs } from "./theme";
 import { addListEntry, removeListEntry, permanentOnly, buildStoredPrefsPayload, type PrefListEntry, type PrefEntryType } from "./prefsLists";
 import { formatHistoryAsJson, formatHistoryAsCsv } from "./historyExport";
 
 const PREFS_KEY = "settingsPrefs";
-const THEME_KEY = "theme";
 const CONTENT_VALUES = ["Dirty", "Clean"] as const;
 
 interface SettingsScreenProps {
   sharedSession: SharedSession | null;
+  // Piece 11 fix (2026-11-11): the SAME shared theme App.tsx's header
+  // reads from - not a second copy loaded independently in here.
+  theme: ThemePrefs;
+  setTheme: (next: ThemePrefs) => void;
 }
 
 interface StoredPrefs {
@@ -51,20 +56,19 @@ function parseStoredPrefs(raw: string | null): StoredPrefs {
   }
 }
 
-export default function SettingsScreen({ sharedSession }: SettingsScreenProps): React.JSX.Element {
-  // Theme - loaded once, edited as "pending" until Save Theme is clicked
-  // (same two-step pattern as Mike's own Settings popup), then saved
-  // locally and applied. docs/decisions/0016: the real app never actually
-  // saved this; this piece adds that, per CLAUDE.md's own Phase 5 goal.
-  const [savedTheme, setSavedTheme] = useState<ThemePrefs>(DEFAULT_THEME);
-  const [pendingAccent, setPendingAccent] = useState(DEFAULT_THEME.accentColor);
-  const [pendingBg, setPendingBg] = useState(DEFAULT_THEME.bgColor);
-  const [themeLoaded, setThemeLoaded] = useState(false);
-
-  // Always On Top - native hook from piece 4; not persisted, matching
-  // both the real prototype's own behavior and CLAUDE.md's acceptance
-  // criteria (neither claims this survives a restart).
-  const [alwaysOnTop, setAlwaysOnTopState] = useState(false);
+export default function SettingsScreen({ sharedSession, theme, setTheme }: SettingsScreenProps): React.JSX.Element {
+  // Theme - the SAVED value is a prop now (App.tsx's useSavedTheme,
+  // piece 11), not a second independent copy loaded here. That split
+  // was the actual bug Ranjish found 2026-11-11: saving here updated
+  // only this screen's own copy, so the header (reading App.tsx's
+  // copy) never found out until the next restart re-loaded it fresh.
+  // His own source never has this problem at all - accentColor/bgColor
+  // are state in the ONE component his whole app is, so there's only
+  // ever one copy to begin with (and he never persists it - docs/
+  // decisions/0016). Pending/staged values stay local here, same two-
+  // step pattern as his Settings popup - that part was never the bug.
+  const [pendingAccent, setPendingAccent] = useState(theme.accentColor);
+  const [pendingBg, setPendingBg] = useState(theme.bgColor);
 
   // Style Profile + Do Play / Do Not Play - loaded once, saved locally on
   // every edit so nothing is lost (matches Mike's persistPrefs), pushed
@@ -89,13 +93,6 @@ export default function SettingsScreen({ sharedSession }: SettingsScreenProps): 
   const [reportCopied, setReportCopied] = useState(false);
 
   useEffect(() => {
-    window.ccdj.prefs.get(THEME_KEY).then((raw) => {
-      const theme = parseThemePrefs(raw);
-      setSavedTheme(theme);
-      setPendingAccent(theme.accentColor);
-      setPendingBg(theme.bgColor);
-      setThemeLoaded(true);
-    });
     window.ccdj.prefs.get(PREFS_KEY).then((raw) => {
       const stored = parseStoredPrefs(raw);
       setStyleProfile(stored.styleProfile);
@@ -105,24 +102,17 @@ export default function SettingsScreen({ sharedSession }: SettingsScreenProps): 
     window.ccdj.history.list(50).then(setHistoryRows);
   }, []);
 
-  const themeChanged = pendingAccent !== savedTheme.accentColor || pendingBg !== savedTheme.bgColor;
+  const themeChanged = pendingAccent !== theme.accentColor || pendingBg !== theme.bgColor;
 
+  // setTheme (App.tsx's useSavedTheme) both persists AND updates the
+  // one shared state the header reads from - this is what makes Save
+  // actually live now, not just saved.
   function saveTheme(): void {
-    const next: ThemePrefs = { accentColor: pendingAccent, bgColor: pendingBg, lightMode: savedTheme.lightMode };
-    setSavedTheme(next);
-    window.ccdj.prefs.set(THEME_KEY, serializeThemePrefs(next));
+    setTheme({ accentColor: pendingAccent, bgColor: pendingBg, lightMode: theme.lightMode });
   }
 
   function toggleLightMode(): void {
-    const next: ThemePrefs = { ...savedTheme, lightMode: !savedTheme.lightMode };
-    setSavedTheme(next);
-    window.ccdj.prefs.set(THEME_KEY, serializeThemePrefs(next));
-  }
-
-  async function toggleAlwaysOnTop(): Promise<void> {
-    const next = !alwaysOnTop;
-    await window.ccdj.setAlwaysOnTop(next);
-    setAlwaysOnTopState(next);
+    setTheme({ ...theme, lightMode: !theme.lightMode });
   }
 
   // docs/decisions/0018: was writing nextDoPlay/nextDoNotPlay straight
@@ -231,62 +221,78 @@ export default function SettingsScreen({ sharedSession }: SettingsScreenProps): 
         packaging is different.
       </p>
 
-      {/* Theme */}
+      {/* Theme - swatch shape/border and the Save button's own color
+          react ported exactly from the source's SwatchRow (line 1006)
+          and Save Theme button (line 5599) - a disabled HTML button
+          with no custom coloring looks nearly identical to an enabled
+          one against a dark popup, which is exactly what made this
+          look broken even though the underlying state wiring (pending
+          vs. saved, swatch onClick -> setPendingX) was already correct. */}
       <h3>Theme</h3>
       <p style={{ fontSize: 12, color: "#666" }}>Highlight color</p>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {SWATCHES_ACCENT.map((c) => (
-          <button
+          <div
             key={c}
             onClick={() => setPendingAccent(c)}
             title={c}
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
+              width: 32,
+              height: 32,
+              borderRadius: 8,
               background: c,
-              border: pendingAccent === c ? "3px solid #fff" : "1px solid #444",
-              cursor: "pointer"
+              cursor: "pointer",
+              border: "2px solid " + (pendingAccent === c ? "#fff" : "#333"),
+              boxSizing: "border-box",
+              flexShrink: 0
             }}
           />
         ))}
       </div>
       <p style={{ fontSize: 12, color: "#666", marginTop: 10 }}>Background color</p>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {SWATCHES_BG.map((c) => (
-          <button
+          <div
             key={c}
             onClick={() => setPendingBg(c)}
             title={c}
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
+              width: 32,
+              height: 32,
+              borderRadius: 8,
               background: c,
-              border: pendingBg === c ? "3px solid #fff" : "1px solid #444",
-              cursor: "pointer"
+              cursor: "pointer",
+              border: "2px solid " + (pendingBg === c ? "#fff" : "#333"),
+              boxSizing: "border-box",
+              flexShrink: 0
             }}
           />
         ))}
       </div>
       <div style={{ marginTop: 10 }}>
-        <button onClick={saveTheme} disabled={!themeChanged || !themeLoaded}>
+        <button
+          onClick={saveTheme}
+          disabled={!themeChanged}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 8,
+            border: themeChanged ? "none" : "1px solid #444",
+            cursor: themeChanged ? "pointer" : "not-allowed",
+            background: themeChanged ? pendingAccent : "#2a2a2a",
+            color: themeChanged ? "#000" : "#888",
+            fontWeight: 700
+          }}
+        >
           Save Theme
         </button>{" "}
         <label>
-          <input type="checkbox" checked={savedTheme.lightMode} onChange={toggleLightMode} /> Light mode
+          <input type="checkbox" checked={theme.lightMode} onChange={toggleLightMode} /> Light mode
         </label>
       </div>
       <p style={{ fontSize: 11, color: "#666" }}>
         Saved locally and remembered after you restart the app (Mike's own prototype doesn't actually save this -
         see docs/decisions/0016).
       </p>
-
-      {/* Always On Top */}
-      <h3>Always On Top</h3>
-      <label>
-        <input type="checkbox" checked={alwaysOnTop} onChange={toggleAlwaysOnTop} /> Keep this window above Serato
-      </label>
 
       {/* Style Profile */}
       <h3>Style Profile</h3>

@@ -57,6 +57,21 @@ interface CcdjLibraryRow {
   playcount: number | null;
 }
 
+// Step 5, piece 9 (Duplicate Finder).
+interface CcdjDuplicateScanRow {
+  id: number;
+  displayName: string;
+  bpm: number;
+  key: string;
+  playcount: number | null;
+  durationSec: number | null;
+  location: string;
+}
+
+interface CcdjPermanentlyDeleteResult {
+  deleted: number;
+}
+
 interface CcdjTrackCheatResult {
   ok: boolean;
   results?: Array<{ trackId: string; name: string; bpm: number | null; key: string; camp: string | null; lane: string | null }>;
@@ -145,6 +160,8 @@ interface Window {
       importFromFile: () => Promise<CcdjLibraryImportResult>;
       getStatus: () => Promise<CcdjLibraryStatus>;
       getAllTracks: () => Promise<CcdjLibraryRow[]>;
+      getTracksForDuplicateScan: () => Promise<CcdjDuplicateScanRow[]>;
+      permanentlyDeleteTracks: (trackIds: number[]) => Promise<CcdjPermanentlyDeleteResult>;
     };
     prefs: {
       get: (key: string) => Promise<string | null>;
@@ -156,6 +173,7 @@ interface Window {
     };
     showInFinder: (trackId: string) => Promise<CcdjShowInFinderResult>;
     setAlwaysOnTop: (flag: boolean) => Promise<boolean>;
+    getAppVersion: () => Promise<string>;
     backend: {
       checkHealth: () => Promise<CcdjBackendHealthResult>;
       createSession: () => Promise<CcdjBackendSessionResult>;
@@ -165,6 +183,7 @@ interface Window {
         vibe: number;
         energy: number;
         playCountMode: string;
+        vibePromptText?: string;
         sessionId?: string;
         clientSeq?: number;
         expectedStateVersion?: number;

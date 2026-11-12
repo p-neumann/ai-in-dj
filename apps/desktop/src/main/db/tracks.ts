@@ -107,6 +107,51 @@ export function getTracksByIds(db: Database.Database, trackIds: string[]): Expor
     .all(...trackIds) as ExportTrackRow[];
 }
 
+export interface DuplicateScanRow {
+  id: string;
+  displayName: string;
+  bpm: number | null;
+  key: string;
+  playcount: number | null;
+  durationSec: number | null;
+  location: string;
+}
+
+// Step 5, piece 9 (Duplicate Finder) - its own query, not a reuse of
+// getAllTracksForLibrary below: duration and location are both
+// essential to the matching algorithm itself (duration is a hard
+// comparison input; location is how it tells "the same file counted
+// twice" apart from "two different files"), not just extra display
+// fields, so they're real inputs here, unlike that query's deliberate
+// no-location rule (CLAUDE.md 5.4 - which is about what leaves this
+// process over the network, not about what the trusted desktop app can
+// show the DJ about files already on their own machine, the same
+// reasoning that already applies to Reveal-in-Finder and Crate Cheat's
+// own export).
+export function getTracksForDuplicateScan(db: Database.Database): DuplicateScanRow[] {
+  return db
+    .prepare("SELECT id, displayName, bpm, key, playcount, durationSec, location FROM tracks")
+    .all() as DuplicateScanRow[];
+}
+
+// Step 5, piece 9 (Duplicate Finder) - the deliberate, separate
+// "Apply Permanently" action only. The default "Send to Recycle Bin"
+// path never calls this - it only hides tracks for the rest of the
+// current session, in the renderer's own memory, exactly like the
+// source (R20): no row here is touched until the DJ takes this
+// second, explicit action. A real transaction (CLAUDE.md 6.2), same
+// pattern as replaceAllTracks - this is a real, permanent removal from
+// CCDJ's own library record. It never touches the actual audio/video
+// file on disk; only this table.
+export function deleteTracksByIds(db: Database.Database, trackIds: string[]): number {
+  if (trackIds.length === 0) return 0;
+  const del = db.transaction((ids: string[]) => {
+    const placeholders = ids.map(() => "?").join(",");
+    return db.prepare(`DELETE FROM tracks WHERE id IN (${placeholders})`).run(...ids).changes;
+  });
+  return del(trackIds);
+}
+
 export interface LibraryRow {
   id: string;
   displayName: string;

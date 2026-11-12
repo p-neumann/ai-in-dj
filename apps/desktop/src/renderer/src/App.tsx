@@ -1,17 +1,29 @@
-// Phase 5 placeholder screen.
+// Phase 5, step 5 piece 11 (shared header/visual port), Stage 1.
 //
-// This is NOT the real CCDJ UI - that gets ported in later (step 5), once
-// the locked-door bridge's real functions exist to connect it to. For now
-// this screen exists to make each step's own point visible on screen,
-// live, in the actually-running app.
+// Replaces the stacked-page shell with the source's real structure:
+// a sticky header + icon row, a real 5-tab bar (reference line 33),
+// launching on Account (tab index 4 - his own deliberate 8/17/26 fix,
+// not Track Cheat). Colors/fonts for the screens BEHIND each tab are
+// Stage 2's job, not this one - this stage only themes the header,
+// tab bar, and Account tab itself.
+//
+// The old "hide every sibling while gigMode" trick (piece 10) is gone -
+// with real tabs, only the active tab's content ever renders, so Gig
+// Mode now only has to do what the source actually does: hide the tab
+// bar (AppHeader's own job, matching gigMode&&tab===0 exactly).
 
 import { useEffect, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 import LibraryScreen from "./library/LibraryScreen";
+import DuplicateFinderScreen from "./duplicateFinder/DuplicateFinderScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
 import SettingsScreen from "./settings/SettingsScreen";
+import AppHeader from "./header/AppHeader";
+import AccountTab from "./account/AccountTab";
+import { useSavedTheme } from "./theme/useSavedTheme";
+import { deriveTheme } from "./theme/deriveTheme";
 
 // docs/decisions/0015: ONE session, created once here, shared by every
 // screen that talks to the backend - Track Cheat, Crate Cheat, and later
@@ -89,13 +101,31 @@ type ImportState =
   | { status: "error"; message: string };
 
 export default function App(): React.JSX.Element {
-  const checks = runChecks();
-  const allPass = checks.every((c) => c.pass);
+  // Source: var [tab,setTab]=s(4) - launches on Account, a deliberate
+  // 8/17/26 fix (CLAUDE2.md's own "where CLAUDE.md gets it wrong"
+  // table, #1). Not a guess - confirmed directly against the code.
+  const [tab, setTab] = useState(4);
+  const [gigMode, setGigMode] = useState(false);
+  const { theme, setTheme } = useSavedTheme();
+  const derived = deriveTheme(theme);
+
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  // Stage 1 bridge (piece 11), not the final design: the header's
+  // style-profile/history/settings-gear icons all open this one real
+  // SettingsScreen for now, since the source's 3 separate popups for
+  // those don't exist as their own components yet (piece 13 splits
+  // them apart). Nothing stops working in the meantime.
+  const [showSettingsBridge, setShowSettingsBridge] = useState(false);
 
   const [importState, setImportState] = useState<ImportState>({ status: "loading" });
   const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
   const [crateList, setCrateList] = useState<CrateTrack[]>([]);
+
+  useEffect(() => {
+    window.ccdj.getAppVersion().then(setAppVersion);
+  }, []);
 
   // On startup, show whatever was already imported and saved, rather than
   // looking empty until the DJ re-imports a file that's genuinely already
@@ -144,93 +174,108 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  async function handleToggleAlwaysOnTop(): Promise<void> {
+    const confirmed = await window.ccdj.setAlwaysOnTop(!alwaysOnTop);
+    setAlwaysOnTop(confirmed);
+  }
+
   const sampleTracksToShow =
     importState.status === "saved" || importState.status === "done" ? importState.sampleTracks : [];
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 640 }}>
-      <p style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#888", fontSize: 12 }}>
-        CheatCode DJ &middot; Phase 5
-      </p>
-      <h1>Desktop shell</h1>
-      <p>
-        Step 1: window opens with the security locks on. Step 2: a real local database. Step 3: real library
-        import, saved for good. Step 4: the rest of the locked-door bridge. Step 5, piece 1: a real, proven
-        connection to the backend server, no AI yet. Step 5, piece 2 (below): the real, searchable, virtualized
-        Library screen - all tracks scroll smoothly, not just the first 500. Step 5, piece 3: Track
-        Cheat core. Step 5, piece 4: daisy-chain and votes, wired into Track Cheat's own session. Step 5,
-        piece 5 (below): Crate Cheat. Next: Playlist Cheat.
-      </p>
+    <div style={{ fontFamily: "Arial,sans-serif", background: derived.bg, minHeight: "100vh", color: "#fff" }}>
+      <AppHeader
+        tab={tab}
+        setTab={setTab}
+        gigMode={gigMode}
+        theme={derived}
+        lightMode={theme.lightMode}
+        alwaysOnTop={alwaysOnTop}
+        onToggleAlwaysOnTop={handleToggleAlwaysOnTop}
+        onToggleLightMode={() => setTheme({ ...theme, lightMode: !theme.lightMode })}
+        onOpenSettingsBridge={() => setShowSettingsBridge(true)}
+      />
 
-      <section
-        style={{
-          border: `2px solid ${allPass ? "#2e7d32" : "#c62828"}`,
-          borderRadius: 8,
-          padding: "1rem",
-          marginTop: "1rem"
-        }}
-      >
-        <h2 style={{ marginTop: 0 }}>
-          Process isolation - {allPass ? "all passing" : "FAILING"}
-        </h2>
-        <ul style={{ paddingLeft: "1.2rem" }}>
-          {checks.map((c) => (
-            <li key={c.label}>
-              <b>{c.pass ? "✓" : "✗"} {c.label}</b>
-              <br />
-              <span style={{ color: "#666", fontSize: 13 }}>{c.detail}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <main style={{ padding: "1.5rem", maxWidth: 720, margin: "0 auto" }}>
+        {tab === 0 && <TrackCheatScreen sharedSession={sharedSession} gigMode={gigMode} setGigMode={setGigMode} theme={derived} />}
 
-      <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Step 3: library import</h2>
-        <button onClick={handleImport} disabled={importState.status === "importing"}>
-          {importState.status === "importing" ? "Importing..." : "Import CSV library..."}
-        </button>
+        {tab === 1 && <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />}
 
-        {importState.status === "loading" && <p style={{ color: "#666" }}>Checking saved library...</p>}
-        {importState.status === "empty" && <p style={{ color: "#666" }}>Nothing imported yet.</p>}
-        {importState.status === "cancelled" && <p style={{ color: "#666" }}>No file selected.</p>}
-        {importState.status === "error" && <p style={{ color: "#c62828" }}>Error: {importState.message}</p>}
+        {tab === 2 && <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} />}
 
-        {importState.status === "saved" && (
-          <p>
-            <b>{importState.count}</b> tracks saved from before (loaded from the database, not re-imported).
-          </p>
+        {tab === 3 && (
+          <>
+            <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
+              <h2 style={{ marginTop: 0 }}>Import library</h2>
+              <button onClick={handleImport} disabled={importState.status === "importing"}>
+                {importState.status === "importing" ? "Importing..." : "Import CSV library..."}
+              </button>
+
+              {importState.status === "loading" && <p style={{ color: "#666" }}>Checking saved library...</p>}
+              {importState.status === "empty" && <p style={{ color: "#666" }}>Nothing imported yet.</p>}
+              {importState.status === "cancelled" && <p style={{ color: "#666" }}>No file selected.</p>}
+              {importState.status === "error" && <p style={{ color: "#c62828" }}>Error: {importState.message}</p>}
+
+              {importState.status === "saved" && (
+                <p>
+                  <b>{importState.count}</b> tracks saved from before (loaded from the database, not re-imported).
+                </p>
+              )}
+
+              {importState.status === "done" && (
+                <p>
+                  Imported <b>{importState.imported}</b> tracks out of {importState.totalRows} rows.
+                  {importState.blankLinesSkipped > 0 && <> {importState.blankLinesSkipped} blank line(s) skipped.</>}
+                  {importState.rowsNeedingAttention > 0 && (
+                    <>
+                      {" "}
+                      <span style={{ color: "#c62828" }}>
+                        {importState.rowsNeedingAttention} row(s) need attention (had some data, but no usable
+                        title/location).
+                      </span>
+                    </>
+                  )}
+                </p>
+              )}
+
+              <SampleTrackList tracks={sampleTracksToShow} />
+            </section>
+
+            <LibraryScreen refreshSignal={libraryRefreshSignal} />
+            <DuplicateFinderScreen refreshSignal={libraryRefreshSignal} />
+          </>
         )}
 
-        {importState.status === "done" && (
-          <p>
-            Imported <b>{importState.imported}</b> tracks out of {importState.totalRows} rows.
-            {importState.blankLinesSkipped > 0 && <> {importState.blankLinesSkipped} blank line(s) skipped.</>}
-            {importState.rowsNeedingAttention > 0 && (
-              <>
-                {" "}
-                <span style={{ color: "#c62828" }}>
-                  {importState.rowsNeedingAttention} row(s) need attention (had some data, but no usable
-                  title/location).
-                </span>
-              </>
-            )}
-          </p>
+        {tab === 4 && <AccountTab theme={derived} lightMode={theme.lightMode} appVersion={appVersion} />}
+
+        {!gigMode && (
+          <section style={{ border: "1px solid #444", borderRadius: 8, padding: "1rem", marginTop: "2rem" }}>
+            <h2 style={{ marginTop: 0, fontSize: 13, color: "#888" }}>Desktop shell diagnostics</h2>
+            <p style={{ fontSize: 12, color: "#666" }}>
+              Our own internal checks, not part of Mike's app - kept visible for debugging, hidden in Gig Mode.
+            </p>
+            <DiagnosticsPanel />
+          </section>
         )}
+      </main>
 
-        <SampleTrackList tracks={sampleTracksToShow} />
-      </section>
-
-      <LibraryScreen refreshSignal={libraryRefreshSignal} />
-      <TrackCheatScreen sharedSession={sharedSession} />
-      <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} />
-      <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />
-      <SettingsScreen sharedSession={sharedSession} />
-
-      <PreferencesSection />
-      <HistorySection />
-      <AlwaysOnTopSection />
-      <BackendConnectionSection />
-    </main>
+      {showSettingsBridge && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setShowSettingsBridge(false)}
+        >
+          <div
+            style={{ background: "#0d0d0d", border: "1px solid #444", borderRadius: 16, padding: "1rem", width: 680, maxWidth: "94vw", maxHeight: "84vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={() => setShowSettingsBridge(false)} style={{ float: "right" }}>
+              × Close
+            </button>
+            <SettingsScreen sharedSession={sharedSession} theme={theme} setTheme={setTheme} />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -262,144 +307,48 @@ function SampleTrackList({ tracks }: { tracks: CcdjSampleTrack[] }): React.JSX.E
   );
 }
 
-function PreferencesSection(): React.JSX.Element {
-  const PREF_KEY = "step4TestPreference";
-  const [value, setValue] = useState("");
-  const [saved, setSaved] = useState<string | null>(null);
-
-  useEffect(() => {
-    window.ccdj.prefs.get(PREF_KEY).then((v) => setSaved(v));
-  }, []);
-
-  async function handleSave(): Promise<void> {
-    await window.ccdj.prefs.set(PREF_KEY, value);
-    setSaved(value);
-  }
-
-  return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 4: preferences</h2>
-      <p style={{ fontSize: 13, color: "#666" }}>
-        Currently saved: <b>{saved === null ? "(nothing saved yet)" : saved === "" ? "(empty string)" : saved}</b>
-      </p>
-      <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Type anything..." />
-      <button onClick={handleSave} style={{ marginLeft: "0.5rem" }}>
-        Save (then restart the app to prove it persists)
-      </button>
-    </section>
-  );
-}
-
-function HistorySection(): React.JSX.Element {
-  const [entries, setEntries] = useState<CcdjHistoryRow[]>([]);
-
-  async function refresh(): Promise<void> {
-    setEntries(await window.ccdj.history.list(10));
-  }
-
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  async function handleAppend(): Promise<void> {
-    await window.ccdj.history.append({ note: "manual test entry", at: new Date().toISOString() });
-    await refresh();
-  }
-
-  return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 4: history</h2>
-      <button onClick={handleAppend}>Append a test entry</button>
-      <ul style={{ paddingLeft: "1.2rem", fontSize: 13, color: "#666", marginTop: "0.5rem" }}>
-        {entries.map((e) => (
-          <li key={e.id}>
-            #{e.id} ({new Date(e.timestamp).toLocaleTimeString()}): {JSON.stringify(e.entry)}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function AlwaysOnTopSection(): React.JSX.Element {
-  const [pinned, setPinned] = useState(false);
-
-  async function handleToggle(): Promise<void> {
-    const confirmed = await window.ccdj.setAlwaysOnTop(!pinned);
-    setPinned(confirmed);
-  }
-
-  return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 4: always on top</h2>
-      <label>
-        <input type="checkbox" checked={pinned} onChange={handleToggle} /> Pin this window above other windows
-      </label>
-    </section>
-  );
-}
-
 type BackendState =
   | { status: "checking" }
   | { status: "reachable" }
-  | { status: "unreachable"; error?: string }
-  | { status: "session-created"; sessionId: string }
-  | { status: "session-error"; error?: string };
+  | { status: "unreachable"; error?: string };
 
-function BackendConnectionSection(): React.JSX.Element {
-  const [state, setState] = useState<BackendState>({ status: "checking" });
-
-  async function checkNow(): Promise<void> {
-    setState({ status: "checking" });
-    const health = await checkBackendHealth();
-    setState(health.reachable ? { status: "reachable" } : { status: "unreachable", error: health.error });
-  }
+// Step 5, piece 11: folds the old separate "process isolation" and
+// "backend connection" scratch sections (step 4/5-piece-1) into one
+// quiet diagnostics panel. The step4TestPreference/history-append/
+// always-on-top scratch sections from that same era are gone entirely -
+// they're fully superseded now by real Settings (piece 7) and the
+// header's own pin icon (piece 11), not by this panel.
+function DiagnosticsPanel(): React.JSX.Element {
+  const checks = runChecks();
+  const allPass = checks.every((c) => c.pass);
+  const [backend, setBackend] = useState<BackendState>({ status: "checking" });
 
   useEffect(() => {
-    checkNow();
+    checkBackendHealth().then((health) => {
+      setBackend(health.reachable ? { status: "reachable" } : { status: "unreachable", error: health.error });
+    });
   }, []);
 
-  async function handleCreateSession(): Promise<void> {
-    const result = await createBackendSession();
-    setState(
-      result.ok && result.sessionId
-        ? { status: "session-created", sessionId: result.sessionId }
-        : { status: "session-error", error: result.error }
-    );
-  }
-
   return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 5, piece 1: backend connection</h2>
-      <p style={{ fontSize: 13, color: "#666" }}>
-        No AI involved here - this only proves the app can reach the real backend server (started separately with{" "}
-        <code>npm start</code> in <code>apps/server</code>) and get a real response back.
+    <div style={{ fontSize: 12, color: "#888" }}>
+      <p>
+        Process isolation: <b style={{ color: allPass ? "#2e7d32" : "#c62828" }}>{allPass ? "all passing" : "FAILING"}</b>
+        {!allPass && (
+          <ul style={{ paddingLeft: "1.2rem" }}>
+            {checks.filter((c) => !c.pass).map((c) => (
+              <li key={c.label}>{c.label}: {c.detail}</li>
+            ))}
+          </ul>
+        )}
       </p>
-
-      {state.status === "checking" && <p>Checking...</p>}
-      {state.status === "reachable" && <p style={{ color: "#2e7d32" }}>✓ Connected to the backend server.</p>}
-      {state.status === "unreachable" && (
-        <p style={{ color: "#c62828" }}>
-          ✗ Not reachable{state.error ? `: ${state.error}` : ""}. Is <code>apps/server</code> running?
-        </p>
-      )}
-      {(state.status === "session-created" || state.status === "session-error") && (
-        <p style={{ color: "#2e7d32" }}>✓ Connected to the backend server.</p>
-      )}
-
-      <button onClick={checkNow} style={{ marginRight: "0.5rem" }}>
-        Check again
-      </button>
-      <button onClick={handleCreateSession}>Create a real session</button>
-
-      {state.status === "session-created" && (
-        <p style={{ marginTop: "0.5rem" }}>
-          Real session created: <code>{state.sessionId}</code>
-        </p>
-      )}
-      {state.status === "session-error" && (
-        <p style={{ marginTop: "0.5rem", color: "#c62828" }}>Session creation failed: {state.error}</p>
-      )}
-    </section>
+      <p>
+        Backend:{" "}
+        {backend.status === "checking" && "checking..."}
+        {backend.status === "reachable" && <span style={{ color: "#2e7d32" }}>✓ reachable</span>}
+        {backend.status === "unreachable" && (
+          <span style={{ color: "#c62828" }}>✗ not reachable{backend.error ? `: ${backend.error}` : ""}</span>
+        )}
+      </p>
+    </div>
   );
 }

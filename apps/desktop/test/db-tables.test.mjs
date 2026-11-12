@@ -19,9 +19,11 @@ import { appendHistoryEntry, listHistory, updateHistoryEntry } from "../src/main
 import { trackId } from "../src/main/db/trackId.ts";
 import {
   countTracks,
+  deleteTracksByIds,
   getAllTracksForLibrary,
   getTrackLocation,
   getTracksByIds,
+  getTracksForDuplicateScan,
   replaceAllTracks
 } from "../src/main/db/tracks.ts";
 
@@ -306,6 +308,40 @@ test("tracks: getTracksByIds returns export fields for known IDs and skips unkno
 test("tracks: getTracksByIds with no IDs returns an empty list", async (t) => {
   const db = await freshDb(t);
   assert.deepEqual(getTracksByIds(db, []), []);
+});
+
+// Duplicate Finder tests adopted from Ranjish's tracks.test.js (step 5,
+// piece 9), with string IDs.
+test("tracks: getTracksForDuplicateScan includes durationSec and location", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4")]);
+
+  const [row] = getTracksForDuplicateScan(db);
+
+  assert.equal(row.id, trackId("/Volumes/DJ/a.mp4"));
+  assert.equal(row.durationSec, 244);
+  assert.equal(row.location, "/Volumes/DJ/a.mp4");
+});
+
+test("tracks: deleteTracksByIds removes exactly the given IDs and counts only real rows", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4"), track("/Volumes/DJ/b.mp4"), track("/Volumes/DJ/c.mp4")]);
+
+  const deleted = deleteTracksByIds(db, [
+    trackId("/Volumes/DJ/a.mp4"),
+    trackId("/Volumes/DJ/c.mp4"),
+    "t_0000000000000000"
+  ]);
+
+  assert.equal(deleted, 2);
+  assert.deepEqual(getAllTracksForLibrary(db).map((r) => r.id), [trackId("/Volumes/DJ/b.mp4")]);
+});
+
+test("tracks: deleteTracksByIds with no IDs deletes nothing", async (t) => {
+  const db = await freshDb(t);
+  replaceAllTracks(db, [track("/Volumes/DJ/a.mp4")]);
+  assert.equal(deleteTracksByIds(db, []), 0);
+  assert.equal(countTracks(db), 1);
 });
 
 test("history: entries without an id can still be saved", async (t) => {

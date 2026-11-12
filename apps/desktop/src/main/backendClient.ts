@@ -160,6 +160,10 @@ export interface BackendTrackCheatRequest {
   vibe: number;
   energy: number;
   playCountMode: string;
+  // Step 5, piece 12 (Stage 2a-bis). Real param, already read and used
+  // server-side (trackCheat.js line 181, into detectStyleTypeLock) -
+  // this is wiring an existing backend feature through, not new logic.
+  vibePromptText?: string;
   sessionId?: string;
   clientSeq?: number;
   expectedStateVersion?: number;
@@ -225,6 +229,7 @@ export async function recommendTrackCheatWithAutoSync(
     vibe: number;
     energy: number;
     playCountMode: string;
+    vibePromptText?: string;
     sessionId?: string;
     clientSeq?: number;
     expectedStateVersion?: number;
