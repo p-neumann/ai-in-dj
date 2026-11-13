@@ -5,7 +5,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { levenshtein, fuzzyEq } = require("../src/renderer/src/playlistCheat/fuzzyMatch.ts");
+const { levenshtein, fuzzyEq } = require("../src/renderer/src/shared/fuzzyMatch.ts");
 
 test("levenshtein: identical strings are distance 0", () => {
   assert.equal(levenshtein("work", "work"), 0);

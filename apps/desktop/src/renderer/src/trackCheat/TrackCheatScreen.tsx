@@ -15,12 +15,32 @@
 // Track" rule-line -> drop zone -> search+GO -> Auto-Seed -> seed card
 // -> status lines -> results.
 //
-// Stage 2a-bis real scope limits, flagged rather than silently built
-// around:
-// - Search+GO stays two steps (pick a match, then press the button) -
-//   his GO button resolves text AND fetches in one click
-//   (handleSearchSeed, source line 2547). Collapsing that would be a
-//   behavior change, not styling (CLAUDE2.md).
+// Search+GO (piece 18, 2026-11-13): both of his routes now, not one
+// replacing the other. Pick a dropdown row - already a real track by
+// construction, no matching needed, same as before. Or type free text
+// and press GO directly - resolved client-side via his own
+// fetchSearchResults/fuzzyFind rule (source 3645, 532-548): exact
+// display-name match first, then fuzzyFind's word-overlap score with
+// its 0.4 floor. Only a real track's numeric ID ever reaches
+// recommendForSeed/the backend either way - the backend contract is
+// unchanged (apps/server/src/routes/trackCheat.js:209-211 still does a
+// plain ID lookup, nothing else).
+//
+// ONE DELIBERATE DEVIATION (Ranjish's explicit call, 2026-11-13, not a
+// styling gap): below the 0.4 floor, his own code fetches anyway - no
+// real seed (seedBpm 0, no BPM window), genre guessed from the typed
+// text itself. This port does NOT do that; it shows "No match in your
+// library" and makes no AI call. Reasons on record: a real paid call
+// for a song that isn't in the library; a mistyped search mid-gig
+// returning ten unexplained suggestions; and this is the one place his
+// own code breaks the library-first rule the rest of the app follows.
+// Recorded in CLAUDE2.md as a deliberate deviation, kept isolated to
+// one state branch (ResultState's "notFoundInLibrary") so it's one
+// branch to change if Mike ever wants the ungrounded fetch back -
+// flagged as an open question for him either way.
+//
+// Stage 2a-bis real scope limits, still true, flagged rather than
+// silently built around:
 // - The drop zone only handles an EXTERNAL file drop (resolves the
 //   dropped filename against the library). His own handler also reads
 //   a dragged-result's custom data for the daisy-chain-by-drag case -
@@ -37,6 +57,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { filterTracks } from "../library/filterTracks";
 import { recommendTrackCheat, sendSessionEvent } from "../api/backendClient";
 import { getVibeLabel } from "./vibeLabels";
+import { buildLikeAsSeedMatches, type LikeAsSeedMatch } from "./likeAsSeed";
+import { resolveSeedTrack } from "./fuzzyFind";
 import type { SharedSession } from "../App";
 import type { DerivedTheme } from "../theme/deriveTheme";
 import GlobalAccentStyle from "../shared/GlobalAccentStyle";
@@ -53,6 +75,25 @@ type ResultState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "done"; data: CcdjTrackCheatResult }
+  // Piece 17 (👍 thumbs-up reseed) - a real result, but never an AI
+  // call (source line 2486: "a direct client-side library search, not
+  // a model call"). Kept as its own state, not folded into "done",
+  // specifically so the AI-only stats line (candidate pool/REAL AI/
+  // simulated AI) below never renders for a result that made no AI
+  // call at all - that would be a false claim about where this result
+  // came from.
+  | { status: "likedAsSeed"; matches: LikeAsSeedMatch[] }
+  // Piece 18 (free-typed GO, 2026-11-13) - the ONE deliberate deviation
+  // from his fetchSearchResults: below fuzzyFind's 0.4 floor, his own
+  // code fetches anyway with no real seed (seedBpm 0, no BPM window,
+  // genre guessed from the typed text alone) rather than stopping.
+  // Ranjish's explicit call: don't port that branch - a real paid AI
+  // call for a song that isn't actually in the library, with results
+  // that have nothing grounding them, is the one place his own code
+  // breaks the library-first rule the rest of the app follows. This
+  // state makes no AI call at all. Recorded as a deliberate deviation
+  // in CLAUDE2.md, with the question left open for Mike.
+  | { status: "notFoundInLibrary"; query: string }
   | { status: "error"; message: string };
 
 interface SessionState {
@@ -150,7 +191,12 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
   const seedTrack = useMemo(() => allTracks?.find((t) => t.id === seedTrackId) ?? null, [allTracks, seedTrackId]);
   const vibeLabel = getVibeLabel(vibe);
   const isBusy = result.status === "loading";
-  const activeResults = result.status === "done" ? result.data.results ?? [] : [];
+  const activeResults =
+    result.status === "done"
+      ? result.data.results ?? []
+      : result.status === "likedAsSeed"
+        ? result.matches.map((m) => ({ ...m, camp: null, lane: null }))
+        : [];
   const sortedResults = useMemo(() => applySort(activeResults, sort), [activeResults, sort]);
   const hasResults = activeResults.length > 0;
 
@@ -232,9 +278,27 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
     }
   }
 
+  // Piece 18 (2026-11-13) - keeps the dropdown pick (seedTrackId
+  // already set, exact by construction - no matching needed) AND adds
+  // his free-typed path (fetchSearchResults/fuzzyFind, source
+  // 3645/532-548): exact display-name match first, then fuzzyFind's
+  // word-overlap scoring with its 0.4 floor. Either way, only a real
+  // track's own numeric ID ever reaches recommendForSeed/the backend -
+  // the contract there is unchanged.
   async function handleGetRecommendations(): Promise<void> {
-    if (seedTrackId === null) return;
-    await recommendForSeed(seedTrackId, "external");
+    if (seedTrackId !== null) {
+      await recommendForSeed(seedTrackId, "external");
+      return;
+    }
+    const query = seedSearch.trim();
+    if (!query || !allTracks) return;
+    const found = resolveSeedTrack(query, allTracks);
+    if (!found) {
+      setResult({ status: "notFoundInLibrary", query });
+      return;
+    }
+    setSeedTo(found.id);
+    await recommendForSeed(found.id, "external");
   }
 
   async function handleDaisyChain(trackId: number): Promise<void> {
@@ -260,6 +324,45 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       if (nextValue) next[trackId] = nextValue;
       else delete next[trackId];
       return next;
+    });
+  }
+
+  // Piece 17 (2026-11-13) - his handleLikeAsSeed (source 2489-2546),
+  // ported exactly: a direct client-side library search by title, no
+  // AI call. Called unconditionally by ResultRow's 👍 button alongside
+  // handleVote, every click, matching his own unconditional double-
+  // call (confirmed verbatim, source line 951) - including when the
+  // click is actually un-voting, same as his.
+  //
+  // Chain-depth reset is LOCAL/display-only, not sent to the server.
+  // His own reset (setDaisyChainDepth(0); chainIdRef.current=
+  // makeHistoryId()) is pure local state, since his whole app has no
+  // server. Our session/chain state is server-authoritative - and the
+  // server's own sessionEvents.js already documents (its own SCOPE
+  // NOTE, lines 7-13) that "likedAsSeed" isn't a distinct origin in
+  // the event contract: sending a generic seedDropped{origin:
+  // "external"} while a real chain is active would be read as an
+  // external swerve (bridge-mode detection), not a clean reset - a
+  // musical-behavior risk (Top Rule 5), not something to guess at
+  // here. So this only clears the LOCAL chain-depth display (hides the
+  // "chained (N links)" line immediately, matching his visual reset);
+  // the server's own chain/bridge/drift state is untouched until the
+  // next real recommend call reports its own chain info. Flagged to
+  // Ranjish, not silently decided.
+  function handleLikeAsSeed(trackId: number): void {
+    if (!allTracks) return;
+    const track = allTracks.find((t) => t.id === trackId);
+    if (!track) return;
+    const matches = buildLikeAsSeedMatches(track.displayName, allTracks, vibe, energy);
+    setSeedTo(trackId);
+    setResult({ status: "likedAsSeed", matches });
+    setSort(DEFAULT_SORT_STATE);
+    if (sessionRef.current) updateSession({ chainId: null, chainDepth: 0 });
+    window.ccdj.history.append({
+      seedName: track.displayName,
+      trigger: "likedAsSeed",
+      resultCount: matches.length,
+      at: new Date().toISOString()
     });
   }
 
@@ -491,7 +594,11 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
             </button>
           )}
         </div>
-        <button onClick={handleGetRecommendations} disabled={seedTrackId === null || isBusy} style={goBtnStyle(theme, seedTrackId === null || isBusy)}>
+        <button
+          onClick={handleGetRecommendations}
+          disabled={(seedTrackId === null && seedSearch.trim() === "") || isBusy}
+          style={goBtnStyle(theme, (seedTrackId === null && seedSearch.trim() === "") || isBusy)}
+        >
           Go
         </button>
       </div>
@@ -554,17 +661,24 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       )}
 
       {result.status === "error" && <p style={{ color: "#e03c3c", fontSize: 13 }}>Error: {result.message}</p>}
+      {result.status === "notFoundInLibrary" && (
+        <p style={{ color: "#e03c3c", fontSize: 13 }}>No match in your library for "{result.query}".</p>
+      )}
       {isBusy && <p style={{ textAlign: "center", padding: "2rem 1rem" }}><span style={glowSweepStyle(theme)}>Finding What Plays Next</span></p>}
-      {result.status === "done" && (
+      {(result.status === "done" || result.status === "likedAsSeed") && (
         <div style={{ marginTop: "0.5rem" }}>
-          {!gigMode && (
+          {!gigMode && result.status === "done" && (
             <p style={{ fontSize: 12, color: GRAY }}>
               {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
               {result.data.candidatePoolSize ?? 0} &middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"}
               {result.data.retried && <span style={{ color: "#a15c00" }}> &middot; retried automatically</span>}
             </p>
           )}
-          {sortedResults.length === 0 && <p style={{ color: GRAY, fontSize: 13 }}>No matches.</p>}
+          {sortedResults.length === 0 && (
+            <p style={{ color: GRAY, fontSize: 13 }}>
+              {result.status === "likedAsSeed" ? "No Other Versions Found In Your Library." : "No matches."}
+            </p>
+          )}
           {sortedResults.length > 0 && (
             <div style={{ border: "1px solid " + theme.accentAlpha(0.15), borderRadius: 10, overflow: "hidden" }}>
               <ResHeader sortField={sort.field} sortDir={sort.dir} onSort={onSort} theme={theme} />
@@ -578,6 +692,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
                   disabled={isBusy}
                   onVote={handleVote}
                   onDaisyChain={handleDaisyChain}
+                  onLikeAsSeed={handleLikeAsSeed}
                 />
               ))}
             </div>

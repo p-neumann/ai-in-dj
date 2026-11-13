@@ -20,6 +20,8 @@
 // comparison safety cap is kept regardless, so a pathological library
 // still can't run away.
 
+import { extractCore } from "../shared/extractCore.ts";
+
 export interface DuplicateFinderTrack {
   id: number;
   displayName: string;
@@ -68,12 +70,6 @@ function getFamilyTag(word: string): number {
   return -1;
 }
 
-export function getArtistTitle(name: string): { artist: string; title: string } {
-  const idx = name.indexOf(" - ");
-  if (idx !== -1) return { artist: name.slice(0, idx).trim(), title: name.slice(idx + 3).trim() };
-  return { artist: "", title: name };
-}
-
 export function getVersionTags(fullName: string): number[] {
   const n = fullName.toLowerCase();
   const families = new Set<number>();
@@ -94,43 +90,13 @@ export function sigsCompatible(aTags: number[], bTags: number[]): boolean {
   return aTags.every((t) => bSet.has(t)) || bTags.every((t) => aSet.has(t));
 }
 
-// Source: extractCore (471-494). Strips version/remix keywords and
-// parentheticals, keeps the first artist word plus up to 4 title words -
-// this is what buckets tracks together before the expensive pairwise
-// comparison, and what the name-overlap score compares.
-const STRIP_WORDS = [
-  "remix", "version", "bootleg", "intro", "outro", "dirty", "clean", "edit", "club", "extended",
-  "radio", "slam", "hype", "vip", "acapella", "instrumental", "redrum", "mashup", "blend",
-  "rework", "flip", "funk", "official", "unofficial", "moombahton", "xtenda", "redrums",
-  "lounge", "deville", "kees", "sjansen", "crooklyn", "taito", "wooderson", "frey", "ligotti",
-  "moji", "muzik", "junkies", "holla", "tik", "tok", "dance", "break", "big", "room", "deep",
-  "house", "beat", "breaker", "supreme", "soundsystem", "cmp", "twerk", "five", "scratch",
-  "stutter", "chop", "riddim", "magenta", "jack", "millz", "arman", "aveiru", "mayhem",
-  "genzo", "ultimate"
-];
-
-export function extractCore(name: string): string {
-  const at = getArtistTitle(name);
-  const artist = at.artist.toLowerCase().trim();
-  const title = at.title || name;
-  let t = title.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "");
-  STRIP_WORDS.forEach((k) => {
-    t = t.split(k).join(" ");
-  });
-  const titleWords = t
-    .replace(/-/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .filter((w) => w.length > 1 && !/^\d+$/.test(w))
-    .slice(0, 4);
-  const artistWords = artist
-    .replace(/ vs\.? .*/, "")
-    .split(" ")
-    .filter((w) => w.length > 1)
-    .slice(0, 1);
-  return artistWords.concat(titleWords).join(" ");
-}
+// Promoted to shared/extractCore.ts (piece 18, 2026-11-13) - Track
+// Cheat's free-typed GO resolver (fuzzyFind.ts) needs the identical
+// word-core extraction, so this is genuinely shared logic now, not a
+// coincidental duplicate. Re-exported here so this file's existing
+// test (test/findDuplicates.test.js) keeps importing it from the same
+// place.
+export { extractCore };
 
 interface Bucketed {
   track: DuplicateFinderTrack;

@@ -20,8 +20,8 @@
 // anyway (line 5850), so there's nothing visible to match.
 
 import { normalizeForMatch } from "./normalizeForMatch.ts";
-import { getRawTitleFromName } from "./getRawTitleFromName.ts";
-import { fuzzyEq } from "./fuzzyMatch.ts";
+import { getRawTitleFromName } from "../shared/getRawTitleFromName.ts";
+import { fuzzyEq } from "../shared/fuzzyMatch.ts";
 import { getEditDescriptor, typeTokenMatches } from "./typeLock.ts";
 
 const TITLE_MATCH_STOPWORDS = new Set([

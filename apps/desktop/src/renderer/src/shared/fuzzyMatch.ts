@@ -1,10 +1,16 @@
 // Ported verbatim from reference/CheatCodeDJ_v_1_0_22016.sanitized.jsx
 // (source lines 505, 517-531). Same logic as apps/server/src/engine/
-// fuzzyMatch.js (Crate Cheat's curated-track matcher) - duplicated here
-// rather than shared, since Playlist Cheat's matcher is explicitly
-// client-side, unprotected logic (CLAUDE.md Section 5.4) and runs in the
-// desktop app's renderer, not the backend server; there is no shared
-// package between the two yet.
+// fuzzyMatch.js (Crate Cheat's curated-track matcher) - duplicated
+// client-side rather than imported from the server, since this is
+// explicitly client-side, unprotected logic (CLAUDE.md Section 5.4)
+// that runs in the desktop app's renderer, not the backend server;
+// there is no shared package between the two.
+//
+// Promoted to shared/ (piece 18, 2026-11-13) - originally lived only
+// in playlistCheat/, now also used by trackCheat/fuzzyFind.ts (Track
+// Cheat's free-typed GO resolver needs the identical typo-tolerance
+// math his own fuzzyFind calls) - genuinely shared, not two
+// coincidentally-similar copies.
 
 export function levenshtein(a: string, b: string): number {
   const m = a.length;

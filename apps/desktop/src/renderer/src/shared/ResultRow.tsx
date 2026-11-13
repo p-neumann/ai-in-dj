@@ -18,8 +18,13 @@
 //   field to the renderer today. This is still a real path through his
 //   own code (what he shows when his own crossoverGenre is falsy), not
 //   an invented substitute.
-// 👍 does not call handleLikeAsSeed either - that's a separate, still-
-// unbuilt real feature (CLAUDE2.md Phase 5 list), not a styling gap.
+// 👍 now also calls onLikeAsSeed (piece 17, 2026-11-13) - his own
+// button does both unconditionally, every click, confirmed verbatim
+// (source line 951): `handleVote(t.name,"up");if(handleLikeAsSeed)
+// handleLikeAsSeed(t.name);` - no special-casing for "only when
+// turning the vote ON." Clicking 👍 a second time to un-vote still
+// re-triggers the reseed, same as his. Ported that exactly, not
+// smoothed over.
 
 import { WHITE, GRAY, bpmBorder } from "./controlStyles";
 import KeyPill from "./KeyPill";
@@ -70,9 +75,10 @@ export interface ResultRowProps {
   disabled: boolean;
   onVote: (trackId: number, value: "up" | "down") => void;
   onDaisyChain: (trackId: number) => void;
+  onLikeAsSeed: (trackId: number) => void;
 }
 
-export function ResultRow({ t, vote, theme, rowBg, disabled, onVote, onDaisyChain }: ResultRowProps): React.JSX.Element {
+export function ResultRow({ t, vote, theme, rowBg, disabled, onVote, onDaisyChain, onLikeAsSeed }: ResultRowProps): React.JSX.Element {
   const at = getArtistTitle(t.name);
   const badge = campBadge(t, theme.accent);
 
@@ -114,7 +120,14 @@ export function ResultRow({ t, vote, theme, rowBg, disabled, onVote, onDaisyChai
           </span>
         )}
         <KeyPill keyVal={t.key} />
-        <button onClick={() => onVote(t.trackId, "up")} disabled={disabled} style={voteBtnStyle(theme, vote === "up", "up")}>
+        <button
+          onClick={() => {
+            onVote(t.trackId, "up");
+            onLikeAsSeed(t.trackId);
+          }}
+          disabled={disabled}
+          style={voteBtnStyle(theme, vote === "up", "up")}
+        >
           👍
         </button>
         <button onClick={() => onVote(t.trackId, "down")} disabled={disabled} style={voteBtnStyle(theme, vote === "down", "down")}>

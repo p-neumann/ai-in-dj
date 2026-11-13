@@ -5,7 +5,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { getRawTitleFromName } = require("../src/renderer/src/playlistCheat/getRawTitleFromName.ts");
+const { getRawTitleFromName } = require("../src/renderer/src/shared/getRawTitleFromName.ts");
 
 test("getRawTitleFromName: strips artist prefix and version tag", () => {
   assert.equal(getRawTitleFromName("Blackstreet - No Diggity (Club Mix)"), "no diggity");

@@ -1,10 +1,17 @@
 // Ported verbatim from reference/CheatCodeDJ_v_1_0_22016.sanitized.jsx
 // (source lines 718-729). Extracts just the title portion out of a
-// library track's displayName, for comparing against a playlist source's
-// title text without the artist or any version/BPM-range tag mixed in.
-// Operates on displayName (filename-derived for Serato-style libraries),
-// not the separate `.title` metadata field, matching the source exactly -
-// CSV `.title` can be blank while the filename carries the real info.
+// library track's displayName, with artist and any version/BPM-range
+// tag stripped off. Operates on displayName (filename-derived for
+// Serato-style libraries), not the separate `.title` metadata field,
+// matching the source exactly - CSV `.title` can be blank while the
+// filename carries the real info.
+//
+// Promoted to shared/ (piece 17, 2026-11-13) - originally lived in
+// playlistCheat/ (its first real use, matching a playlist's title text
+// against the library), now also used by trackCheat/likeAsSeed.ts
+// (matching a thumbs-upped result against every other version of the
+// same song) - genuinely shared logic, not two coincidentally-similar
+// copies, so it moved rather than being re-duplicated a third time.
 
 export function getRawTitleFromName(name: string): string {
   let s = name.replace(/\s*-\s*(dirty|clean|explicit|radio|instrumental)\s*$/i, "").trim();
