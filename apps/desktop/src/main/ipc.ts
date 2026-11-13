@@ -244,7 +244,7 @@ export function registerExportIpc(db: Database.Database): void {
     "files:exportCrateTracks",
     async (
       event: Electron.IpcMainInvokeEvent,
-      params: { format: ExportFormat; trackIds: number[]; prompt: string }
+      params: { format: ExportFormat; trackIds: number[]; prompt: string; reasons?: Record<number, string> }
     ): Promise<{ cancelled: boolean; filePath?: string }> => {
       const rows = getTracksByIds(db, params.trackIds);
       const byId = new Map(rows.map((r) => [r.id, r]));
@@ -253,12 +253,15 @@ export function registerExportIpc(db: Database.Database): void {
       // (e.g. a re-import since the crate was built) is dropped, not
       // guessed at.
       const tracks: ExportTrack[] = [];
+      const jsonTracks: ExportJsonTrack[] = [];
       for (const id of params.trackIds) {
         const row = byId.get(id);
         if (!row) continue;
         tracks.push({ name: row.displayName, artist: row.artist, bpm: row.bpm, key: row.key, location: row.location });
+        // "reason" is renderer-only state (piece 19) - never a DB
+        // column - so it arrives via the IPC call itself, not getTracksByIds.
+        jsonTracks.push({ name: row.displayName, artist: row.artist, bpm: row.bpm, key: row.key, reason: params.reasons?.[id] ?? "" });
       }
-      const jsonTracks: ExportJsonTrack[] = tracks.map((t) => ({ name: t.name, artist: t.artist, bpm: t.bpm, key: t.key }));
       const content = buildExportContent(params.format, tracks, jsonTracks, { prompt: params.prompt.slice(0, 200) });
       const window = BrowserWindow.fromWebContents(event.sender);
       return showExportSaveDialog(window, params.format, "cheatcode_cratecheat", content);

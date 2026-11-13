@@ -240,7 +240,7 @@ const api = {
   // track objects straight through, with no location ever (a real
   // asymmetry in the source, not something invented here).
   export: {
-    exportCrateTracks: (params: { format: ExportFormat; trackIds: number[]; prompt: string }): Promise<ExportResult> =>
+    exportCrateTracks: (params: { format: ExportFormat; trackIds: number[]; prompt: string; reasons?: Record<number, string> }): Promise<ExportResult> =>
       ipcRenderer.invoke("files:exportCrateTracks", params),
     exportPlaylistTracks: (params: {
       format: ExportFormat;

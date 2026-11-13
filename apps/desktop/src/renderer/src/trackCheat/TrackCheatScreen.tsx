@@ -584,9 +584,14 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
           />
           {seedSearch && (
             <button
+              // Source (lines 5682/5788): setSearchQuery(""); setSearchSeedTrack(null);
+              // setSearchBangerResults([]) - clears the text, the seed, AND whatever
+              // results are showing. Ours only cleared the first two; piece 19 adds
+              // the third.
               onClick={() => {
                 setSeedSearch("");
                 setSeedTrackId(null);
+                setResult({ status: "idle" });
               }}
               style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: GRAY, fontSize: 18, cursor: "pointer" }}
             >

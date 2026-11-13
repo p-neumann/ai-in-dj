@@ -199,7 +199,10 @@ export default function PlaylistCheatScreen({ onAddToCrate, work, setWork, theme
       if (mi === undefined) return;
       const m = r.matches[mi];
       if (!m) return;
-      tracks.push({ trackId: m.id, name: m.displayName, bpm: m.bpm, key: m.key });
+      // Source's spotifyToPlaylist (line 4980): reason:"From Spotify"
+      // on every pushed track, unconditionally - even for plain-text/
+      // file-sourced matches, same as his hardcoded string.
+      tracks.push({ trackId: m.id, name: m.displayName, bpm: m.bpm, key: m.key, reason: "From Spotify" });
     });
     if (tracks.length) onAddToCrate(tracks);
   }

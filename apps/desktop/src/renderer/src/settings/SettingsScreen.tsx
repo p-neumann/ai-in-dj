@@ -248,6 +248,7 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
             }}
           />
         ))}
+        <CustomColorSwatch value={pendingAccent} onChange={setPendingAccent} />
       </div>
       <p style={{ fontSize: 12, color: "#666", marginTop: 10 }}>Background color</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -268,6 +269,7 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
             }}
           />
         ))}
+        <CustomColorSwatch value={pendingBg} onChange={setPendingBg} />
       </div>
       <div style={{ marginTop: 10 }}>
         <button
@@ -312,11 +314,20 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
       <p style={{ fontSize: 11, color: "#666" }}>
         Do Play is favored, never excludes others. Do Not Play is a hard block, no exceptions.
       </p>
+      {/* Source lines 5529-5530, two separate footnotes - piece 19 adds
+          the first one (entirely missing before this piece) and fixes
+          the second one's wording, which was a paraphrase, to match
+          verbatim including the ⚠ marker. */}
       <p style={{ fontSize: 10, color: "#888", fontStyle: "italic" }}>
-        The Content (Dirty/Clean) filter checks a real explicit/content tag if your library data has one - but
-        standard CSV exports usually don't include that field, so in practice it currently checks whether the words
-        "dirty" or "explicit" literally appear in the track's title, nothing else. It doesn't listen to the audio or
-        check lyrics. Accuracy depends entirely on your own filename conventions.
+        ⚠ Do Not Play accuracy depends on your library's filename conventions and tags (e.g. "(Dirty)" markers).
+        Always preview before playing - this is not a substitute for checking yourself.
+      </p>
+      <p style={{ fontSize: 10, color: "#888", fontStyle: "italic" }}>
+        ⚠ The Content (Clean/Dirty) filter checks a real explicit/content tag if your library data has one - but as
+        of today, standard CSV exports don't include that field, so in practice it's currently checking whether the
+        words "dirty" or "explicit" literally appear in the track's title, nothing else. It doesn't listen to the
+        audio or check lyrics. If your library marks explicit tracks a different way (or doesn't mark them at all),
+        this filter won't catch them. Accuracy currently depends entirely on your own filename conventions.
       </p>
 
       <p style={{ fontWeight: 600, fontSize: 12 }}>Do Play</p>
@@ -450,5 +461,38 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
         </div>
       )}
     </section>
+  );
+}
+
+// Piece 19 (2026-11-14) - source's SwatchRow (line 1006), the custom-
+// color half only (the fixed-swatch half was already ported, piece 7).
+// A conic-gradient circle with a real <input type="color"> overlaid
+// and made invisible (opacity:0) - clicking the circle opens the OS
+// color picker, same trick his code uses, letting the DJ pick ANY
+// color, not just the 8 presets.
+function CustomColorSwatch({ value, onChange }: { value: string; onChange: (c: string) => void }): React.JSX.Element {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ position: "relative", width: 32, height: 32, flexShrink: 0 }}>
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "conic-gradient(red,yellow,lime,cyan,blue,magenta,red)",
+            cursor: "pointer",
+            border: "2px solid transparent",
+            boxSizing: "border-box"
+          }}
+        />
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%", borderRadius: "50%" }}
+        />
+      </div>
+      <span style={{ fontSize: 11, color: "#bbb", whiteSpace: "nowrap" }}>Custom</span>
+    </div>
   );
 }

@@ -114,10 +114,18 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
     setExportBusy(true);
     setExportMessage(null);
     try {
+      // "reason" (piece 19) is renderer-only state, never a DB column,
+      // so it has to go over the wire itself - main can't look it up
+      // by trackId the way it does displayName/bpm/key/location.
+      const reasons: Record<number, string> = {};
+      tracks.forEach((t) => {
+        if (t.reason) reasons[t.trackId] = t.reason;
+      });
       const outcome = await window.ccdj.export.exportCrateTracks({
         format,
         trackIds: tracks.map((t) => t.trackId),
-        prompt
+        prompt,
+        reasons
       });
       setExportMessage(outcome.cancelled ? null : `Saved: ${outcome.filePath}`);
     } catch (error) {

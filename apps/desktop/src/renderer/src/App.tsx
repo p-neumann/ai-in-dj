@@ -50,6 +50,12 @@ export interface CrateTrack {
   name: string;
   bpm: number;
   key: string;
+  // Piece 19 (2026-11-14) - source's spotifyToPlaylist (line 4980)
+  // tags every track it pushes with reason:"From Spotify"; a track
+  // Crate Cheat's own AI build adds has no reason at all (his
+  // reason:"" default). Surfaced only in the JSON export, same as his
+  // (confirmed: his CSV/M3U/TXT export never includes it either).
+  reason?: string;
 }
 
 // Stage 2b fix (2026-11-12, "Finding 3"): source holds spotifyResults/

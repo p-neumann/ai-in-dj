@@ -219,6 +219,7 @@ interface Window {
         format: CcdjExportFormat;
         trackIds: number[];
         prompt: string;
+        reasons?: Record<number, string>;
       }) => Promise<CcdjExportResult>;
       exportPlaylistTracks: (params: {
         format: CcdjExportFormat;

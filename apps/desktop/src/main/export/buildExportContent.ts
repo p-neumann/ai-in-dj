@@ -39,6 +39,15 @@ export interface ExportJsonTrack {
   isSource?: boolean;
   isMatch?: boolean;
   noMatch?: boolean;
+  // Piece 19 (2026-11-14) - source line 5215/4980: Crate Cheat's own
+  // JSON export carries a "reason" per track; today the only real
+  // value it's ever set to is "From Spotify", written by his
+  // spotifyToPlaylist when a track arrives via Playlist Cheat's "Add
+  // To Crate" (even for plain-text/file-sourced matches - his own
+  // hardcoded string, not re-derived from actual origin here either).
+  // Tracks built directly by Crate Cheat's own AI pipeline have no
+  // reason at all, matching his reason:"" default.
+  reason?: string;
 }
 
 function csvField(value: string): string {
