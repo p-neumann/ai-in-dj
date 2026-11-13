@@ -20,6 +20,17 @@ export interface LibraryImportResult {
   sampleTracks?: SampleTrack[];
 }
 
+// Step 5, piece 16 - the drag-and-drop import path. Never "cancelled"
+// the way the dialog path can be: by the time this is called, the
+// renderer already has the dropped file's text in hand.
+export interface ImportSummary {
+  imported: number;
+  blankLinesSkipped: number;
+  rowsNeedingAttention: number;
+  totalRows: number;
+  sampleTracks: SampleTrack[];
+}
+
 export interface LibraryStatus {
   count: number;
   sampleTracks: SampleTrack[];
@@ -160,6 +171,9 @@ export interface ExportResult {
 const api = {
   library: {
     importFromFile: (): Promise<LibraryImportResult> => ipcRenderer.invoke("library:importFromFile"),
+    // Real drag-and-drop (piece 16): the renderer reads the dropped
+    // file's own text (File.text()) and sends that - never a path.
+    importFromText: (text: string): Promise<ImportSummary> => ipcRenderer.invoke("library:importFromText", text),
     getStatus: (): Promise<LibraryStatus> => ipcRenderer.invoke("library:getStatus"),
     getAllTracks: (): Promise<LibraryRow[]> => ipcRenderer.invoke("library:getAllTracks"),
     // Step 5, piece 9 (Duplicate Finder).
@@ -167,7 +181,11 @@ const api = {
     // The deliberate "Apply Permanently" action only - never called by
     // the default, session-only "Send to Recycle Bin" path.
     permanentlyDeleteTracks: (trackIds: number[]): Promise<PermanentlyDeleteResult> =>
-      ipcRenderer.invoke("library:permanentlyDeleteTracks", trackIds)
+      ipcRenderer.invoke("library:permanentlyDeleteTracks", trackIds),
+    // Piece 16 - source's Clear Library, ported literally (no
+    // confirmation prompt here; App.tsx's onClearLibrary callback is
+    // what also clears the crate, matching his setLibrary([])+setPlaylist([])).
+    clear: (): Promise<PermanentlyDeleteResult> => ipcRenderer.invoke("library:clear")
   },
   prefs: {
     get: (key: string): Promise<string | null> => ipcRenderer.invoke("prefs:get", key),

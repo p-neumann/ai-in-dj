@@ -123,6 +123,22 @@ export function sizeBtnStyle(theme: DerivedTheme, active: boolean): React.CSSPro
 
 export const bpmBorder = (theme: DerivedTheme): string => "1px solid " + theme.accent;
 
+// Source line 5311 (smBtn) - the small outlined button used for Clear
+// Library, Select All, Export Crate, etc. `danger` is his dark-red
+// variant (Clear Library uses smBtn(true)).
+export function smBtnStyle(theme: DerivedTheme, danger = false): React.CSSProperties {
+  return {
+    fontSize: 12,
+    padding: "6px 14px",
+    background: "transparent",
+    border: "1px solid " + (danger ? "#5a2a2a" : theme.accentAlpha(0.3)),
+    borderRadius: 8,
+    color: danger ? "#a44" : theme.accent,
+    cursor: "pointer",
+    letterSpacing: "0.04em"
+  };
+}
+
 // Source line 5331 - the gradient-sweep text used for "Finding What
 // Plays Next," animated via GlobalAccentStyle's injected .glow-sweep
 // keyframes (piece 12).

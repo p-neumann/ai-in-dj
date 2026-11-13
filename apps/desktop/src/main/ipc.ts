@@ -14,7 +14,8 @@ import {
   getAllTracksForLibrary,
   getTracksByIds,
   getTracksForDuplicateScan,
-  deleteTracksByIds
+  deleteTracksByIds,
+  clearAllTracks
 } from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
 import { appendHistoryEntry, listHistory } from "./db/history.ts";
@@ -61,6 +62,20 @@ function buildImportSummary(db: Database.Database, imported: ReturnType<typeof i
 // (which syncs/retries using it) below.
 let cachedLibraryRevision: number | null = null;
 
+// Shared by both import paths below (native dialog and real drag-and-
+// drop) - same transaction, same cache invalidation, same summary
+// shape, regardless of how the CSV text reached this process.
+function performImport(db: Database.Database, text: string) {
+  const imported = importLibraryFromCsvText(text);
+  // One transaction, whole-table replace (db/tracks.ts) - re-importing
+  // the same file twice must leave the count unchanged, never doubled.
+  replaceAllTracks(db, imported.tracks);
+  // The content just changed - any cached revision now describes the
+  // OLD library. Forces a fresh sync before the next recommend call.
+  cachedLibraryRevision = null;
+  return buildImportSummary(db, imported);
+}
+
 // Step 3 (library import) - taking no renderer-supplied path at all; the
 // file comes from a native OS dialog the main process controls.
 export function registerLibraryIpc(db: Database.Database): void {
@@ -80,15 +95,19 @@ export function registerLibraryIpc(db: Database.Database): void {
     }
 
     const text = readFileSync(picked.filePaths[0], "utf8");
-    const imported = importLibraryFromCsvText(text);
-    // One transaction, whole-table replace (db/tracks.ts) - re-importing
-    // the same file twice must leave the count unchanged, never doubled.
-    replaceAllTracks(db, imported.tracks);
-    // The content just changed - any cached revision now describes the
-    // OLD library. Forces a fresh sync before the next recommend call.
-    cachedLibraryRevision = null;
+    return { cancelled: false as const, ...performImport(db, text) };
+  });
 
-    return { cancelled: false as const, ...buildImportSummary(db, imported) };
+  // Step 5, piece 16 (Library styling) - his real drag-and-drop zone
+  // (source lines 5947-5951), built for real rather than a decorative
+  // shell that just opens the dialog: the renderer reads the dropped
+  // file's CONTENTS (File.text(), standard web API on the dropped
+  // File object) and sends that text here - never a path, keeping
+  // CLAUDE.md 5.4/7.5's path-privacy rule intact exactly the same way
+  // the dialog path already does, just with the browser handing over
+  // bytes instead of this process reading a path it chose itself.
+  ipcMain.handle("library:importFromText", (_event, text: string) => {
+    return performImport(db, text);
   });
 
   // Lets the renderer show what's already saved on startup, instead of
@@ -96,6 +115,15 @@ export function registerLibraryIpc(db: Database.Database): void {
   ipcMain.handle("library:getStatus", () => {
     const count = countTracks(db);
     return { count, sampleTracks: count > 0 ? getSampleTracks(db, 5) : [] };
+  });
+
+  // Step 5, piece 16 - source's Clear Library (setLibrary([])), ported
+  // literally: no confirmation. A real DELETE, same staleness rule as
+  // import/permanent-delete applies to the backend's cached revision.
+  ipcMain.handle("library:clear", () => {
+    const deleted = clearAllTracks(db);
+    if (deleted > 0) cachedLibraryRevision = null;
+    return { deleted };
   });
 
   // Step 5, piece 2 - the real Library screen. One fetch of everything;

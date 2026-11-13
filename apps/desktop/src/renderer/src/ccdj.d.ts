@@ -16,6 +16,14 @@ interface CcdjLibraryImportResult {
   sampleTracks?: CcdjSampleTrack[];
 }
 
+interface CcdjImportSummary {
+  imported: number;
+  blankLinesSkipped: number;
+  rowsNeedingAttention: number;
+  totalRows: number;
+  sampleTracks: CcdjSampleTrack[];
+}
+
 interface CcdjLibraryStatus {
   count: number;
   sampleTracks: CcdjSampleTrack[];
@@ -158,10 +166,12 @@ interface Window {
   ccdj: {
     library: {
       importFromFile: () => Promise<CcdjLibraryImportResult>;
+      importFromText: (text: string) => Promise<CcdjImportSummary>;
       getStatus: () => Promise<CcdjLibraryStatus>;
       getAllTracks: () => Promise<CcdjLibraryRow[]>;
       getTracksForDuplicateScan: () => Promise<CcdjDuplicateScanRow[]>;
       permanentlyDeleteTracks: (trackIds: number[]) => Promise<CcdjPermanentlyDeleteResult>;
+      clear: () => Promise<CcdjPermanentlyDeleteResult>;
     };
     prefs: {
       get: (key: string) => Promise<string | null>;

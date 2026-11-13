@@ -113,6 +113,18 @@ export function getTracksForDuplicateScan(db: Database.Database): DuplicateScanR
 // pattern as replaceAllTracks - this is a real, permanent removal from
 // CCDJ's own library record. It never touches the actual audio/video
 // file on disk; only this table.
+// Step 5, piece 16 (Library/Duplicate Finder styling) - source's Clear
+// Library (setLibrary([])) ported literally: no confirmation, whole-
+// table wipe. A real DELETE, not a soft/session-only hide (R20's
+// session-only pattern is Duplicate Finder's own "Send to Recycle Bin"
+// specifically, not this) - the open question for Mike (docs/
+// QUESTIONS.md) is whether a DB-backed clear deserves more friction
+// than his in-memory one, not whether to port his behavior faithfully
+// in the meantime.
+export function clearAllTracks(db: Database.Database): number {
+  return db.prepare("DELETE FROM tracks").run().changes;
+}
+
 export function deleteTracksByIds(db: Database.Database, trackIds: number[]): number {
   if (trackIds.length === 0) return 0;
   const del = db.transaction((ids: number[]) => {

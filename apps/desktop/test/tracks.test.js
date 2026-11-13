@@ -15,7 +15,8 @@ const {
   getAllTracksForLibrary,
   getTracksByIds,
   getTracksForDuplicateScan,
-  deleteTracksByIds
+  deleteTracksByIds,
+  clearAllTracks
 } = require("../src/main/db/tracks.ts");
 
 function sampleTrack(n) {
@@ -40,6 +41,29 @@ test("replaceAllTracks: inserts the given tracks and they can be counted back", 
 
   replaceAllTracks(db, [sampleTrack(1), sampleTrack(2), sampleTrack(3)]);
   assert.equal(countTracks(db), 3);
+  db.close();
+});
+
+// Phase 5, step 5 piece 16 - Clear Library, ported literally from the
+// source's setLibrary([]): a real, whole-table wipe, no confirmation
+// (the confirmation question is a UI-layer, open Mike question -
+// docs/QUESTIONS.md - not this function's job).
+test("clearAllTracks: removes every row, real count back", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+  replaceAllTracks(db, [sampleTrack(1), sampleTrack(2), sampleTrack(3)]);
+
+  const deleted = clearAllTracks(db);
+  assert.equal(deleted, 3);
+  assert.equal(countTracks(db), 0);
+  db.close();
+});
+
+test("clearAllTracks: an already-empty library deletes nothing, real zero back", () => {
+  const db = new Database(":memory:");
+  runMigrations(db);
+
+  assert.equal(clearAllTracks(db), 0);
   db.close();
 });
 

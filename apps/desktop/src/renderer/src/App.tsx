@@ -15,7 +15,6 @@
 import { useEffect, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
 import LibraryScreen from "./library/LibraryScreen";
-import DuplicateFinderScreen from "./duplicateFinder/DuplicateFinderScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
@@ -103,22 +102,6 @@ function runChecks(): Check[] {
   ];
 }
 
-type ImportState =
-  | { status: "loading" }
-  | { status: "empty" }
-  | { status: "saved"; count: number; sampleTracks: CcdjSampleTrack[] }
-  | { status: "importing" }
-  | {
-      status: "done";
-      imported: number;
-      blankLinesSkipped: number;
-      rowsNeedingAttention: number;
-      totalRows: number;
-      sampleTracks: CcdjSampleTrack[];
-    }
-  | { status: "cancelled" }
-  | { status: "error"; message: string };
-
 export default function App(): React.JSX.Element {
   // Source: var [tab,setTab]=s(4) - launches on Account, a deliberate
   // 8/17/26 fix (CLAUDE2.md's own "where CLAUDE.md gets it wrong"
@@ -137,8 +120,6 @@ export default function App(): React.JSX.Element {
   // them apart). Nothing stops working in the meantime.
   const [showSettingsBridge, setShowSettingsBridge] = useState(false);
 
-  const [importState, setImportState] = useState<ImportState>({ status: "loading" });
-  const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
   const [crateList, setCrateList] = useState<CrateTrack[]>([]);
   const [playlistCheatWork, setPlaylistCheatWork] = useState<PlaylistCheatWork>({
@@ -151,16 +132,6 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     window.ccdj.getAppVersion().then(setAppVersion);
-  }, []);
-
-  // On startup, show whatever was already imported and saved, rather than
-  // looking empty until the DJ re-imports a file that's genuinely already
-  // in the database (CLAUDE.md's own Phase 5 "Expected result": a restart
-  // keeps permanent data).
-  useEffect(() => {
-    window.ccdj.library.getStatus().then((status) => {
-      setImportState(status.count > 0 ? { status: "saved", ...status } : { status: "empty" });
-    });
   }, []);
 
   // One session for the whole app, created once (docs/decisions/0015).
@@ -178,35 +149,10 @@ export default function App(): React.JSX.Element {
     });
   }, []);
 
-  async function handleImport(): Promise<void> {
-    setImportState({ status: "importing" });
-    try {
-      const result = await window.ccdj.library.importFromFile();
-      if (result.cancelled) {
-        setImportState({ status: "cancelled" });
-        return;
-      }
-      setImportState({
-        status: "done",
-        imported: result.imported ?? 0,
-        blankLinesSkipped: result.blankLinesSkipped ?? 0,
-        rowsNeedingAttention: result.rowsNeedingAttention ?? 0,
-        totalRows: result.totalRows ?? 0,
-        sampleTracks: result.sampleTracks ?? []
-      });
-      setLibraryRefreshSignal((n) => n + 1);
-    } catch (error) {
-      setImportState({ status: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
   async function handleToggleAlwaysOnTop(): Promise<void> {
     const confirmed = await window.ccdj.setAlwaysOnTop(!alwaysOnTop);
     setAlwaysOnTop(confirmed);
   }
-
-  const sampleTracksToShow =
-    importState.status === "saved" || importState.status === "done" ? importState.sampleTracks : [];
 
   return (
     <div style={{ fontFamily: "Arial,sans-serif", background: derived.bg, minHeight: "100vh", color: "#fff" }}>
@@ -244,48 +190,7 @@ export default function App(): React.JSX.Element {
 
         {tab === 2 && <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} theme={derived} onGoToLibrary={() => setTab(3)} />}
 
-        {tab === 3 && (
-          <>
-            <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-              <h2 style={{ marginTop: 0 }}>Import library</h2>
-              <button onClick={handleImport} disabled={importState.status === "importing"}>
-                {importState.status === "importing" ? "Importing..." : "Import CSV library..."}
-              </button>
-
-              {importState.status === "loading" && <p style={{ color: "#666" }}>Checking saved library...</p>}
-              {importState.status === "empty" && <p style={{ color: "#666" }}>Nothing imported yet.</p>}
-              {importState.status === "cancelled" && <p style={{ color: "#666" }}>No file selected.</p>}
-              {importState.status === "error" && <p style={{ color: "#c62828" }}>Error: {importState.message}</p>}
-
-              {importState.status === "saved" && (
-                <p>
-                  <b>{importState.count}</b> tracks saved from before (loaded from the database, not re-imported).
-                </p>
-              )}
-
-              {importState.status === "done" && (
-                <p>
-                  Imported <b>{importState.imported}</b> tracks out of {importState.totalRows} rows.
-                  {importState.blankLinesSkipped > 0 && <> {importState.blankLinesSkipped} blank line(s) skipped.</>}
-                  {importState.rowsNeedingAttention > 0 && (
-                    <>
-                      {" "}
-                      <span style={{ color: "#c62828" }}>
-                        {importState.rowsNeedingAttention} row(s) need attention (had some data, but no usable
-                        title/location).
-                      </span>
-                    </>
-                  )}
-                </p>
-              )}
-
-              <SampleTrackList tracks={sampleTracksToShow} />
-            </section>
-
-            <LibraryScreen refreshSignal={libraryRefreshSignal} />
-            <DuplicateFinderScreen refreshSignal={libraryRefreshSignal} />
-          </>
-        )}
+        {tab === 3 && <LibraryScreen theme={derived} onClearLibrary={() => setCrateList([])} />}
 
         {tab === 4 && <AccountTab theme={derived} lightMode={theme.lightMode} appVersion={appVersion} />}
 
@@ -317,34 +222,6 @@ export default function App(): React.JSX.Element {
         </div>
       )}
     </div>
-  );
-}
-
-function SampleTrackList({ tracks }: { tracks: CcdjSampleTrack[] }): React.JSX.Element | null {
-  const [revealResult, setRevealResult] = useState<Record<number, string>>({});
-
-  if (tracks.length === 0) return null;
-
-  async function handleReveal(id: number): Promise<void> {
-    const result = await window.ccdj.showInFinder(id);
-    setRevealResult((prev) => ({
-      ...prev,
-      [id]: result.ok ? "Opened." : `Could not open: ${result.reason}`
-    }));
-  }
-
-  return (
-    <ul style={{ paddingLeft: "1.2rem", fontSize: 13, color: "#666", marginTop: "0.5rem" }}>
-      {tracks.map((t) => (
-        <li key={t.id} style={{ marginBottom: "0.3rem" }}>
-          {t.displayName}{" "}
-          <button onClick={() => handleReveal(t.id)} style={{ fontSize: 11 }}>
-            Reveal in Finder
-          </button>
-          {revealResult[t.id] && <span style={{ marginLeft: "0.5rem" }}>{revealResult[t.id]}</span>}
-        </li>
-      ))}
-    </ul>
   );
 }
 
