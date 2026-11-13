@@ -152,3 +152,20 @@ export function ResHeader({ sortField, sortDir, onSort, theme }: ResHeaderProps)
     </div>
   );
 }
+
+// Source: CrateHeader (line 5334) - identical to ResHeader but with a
+// 20px spacer before the sort headers, for the checkbox column
+// CheckboxTrackRow has and ResultRow doesn't. Used by both Crate Cheat
+// and Playlist Cheat's results list, not just "crates".
+export function CheckboxListHeader({ sortField, sortDir, onSort, theme }: ResHeaderProps): React.JSX.Element {
+  return (
+    <div style={{ display: "flex", alignItems: "center", padding: "4px 14px", background: "rgba(0,0,0,0.5)", borderBottom: "1px solid " + theme.accentAlpha(0.15), gap: 10 }}>
+      <div style={{ width: 20, flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <SortHeader field="name" label="Artist / Title" sortField={sortField} sortDir={sortDir} onSort={onSort} accent={theme.accent} />
+      </div>
+      <SortHeader field="bpm" label="BPM" sortField={sortField} sortDir={sortDir} onSort={onSort} accent={theme.accent} />
+      <SortHeader field="key" label="Key" sortField={sortField} sortDir={sortDir} onSort={onSort} accent={theme.accent} />
+    </div>
+  );
+}

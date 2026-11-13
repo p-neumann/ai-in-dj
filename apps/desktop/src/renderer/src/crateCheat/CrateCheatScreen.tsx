@@ -1,35 +1,41 @@
-// Phase 5, step 5 piece 5 - Crate Cheat core.
+// Phase 5, step 5 piece 5 (core) + piece 8 (export) + piece 13, Stage
+// 2b (real styling).
 //
 // Same division of labor as Track Cheat (piece 3): the actual crate-
-// building pipeline (curated-track/era knowledge resolution, context
-// building, era/type-lock filtering, Do Play/Do Not Play, the AI call,
-// post-filtering) already lives in the backend, built and tested in
+// building pipeline already lives in the backend, built and tested in
 // Phase 3/4 (engine/crateOrchestration.js). This screen only sends a
-// prompt, size, and play-count mode to the already-built
-// POST /v1/crates/build route and shows what comes back - nothing here
-// re-implements or changes any selection/ranking logic.
+// prompt, size, and play-count mode to the already-built, already-
+// tested POST /v1/crates/build route and shows what comes back -
+// nothing here re-implements or changes any selection/ranking logic.
 //
-// docs/decisions/0011: crate build now accepts libraryRevision the same
-// way Track Cheat does, so this screen reuses the SAME sync-if-needed /
-// resync-on-LIBRARY_OUT_OF_SYNC flow (buildCrateWithAutoSync) instead of
-// re-triggering the real HTTP 413 Track Cheat hit against a real library
-// sent inline.
+// Render order matches the source exactly, checked directly (reference
+// 5884-5941): rule-line "Build Your Own Crate From Your Own Words" ->
+// card (prompt textarea + mic, Vibe Prompt, size buttons, Build Crate
+// right-aligned) -> selected-count/Select All/Export Crate dropdown ->
+// crate list.
 //
-// docs/decisions/0015: now sends the app's one shared sessionId with
-// every build. Before this, Crate Cheat sent no session id at all, so
-// Do Not Play/Do Play and thumbs-down exclusions from the same gig never
-// reached it - this is the fix for that, not a new feature.
+// Real, confirmed difference from his screen, kept deliberately (CLAUDE2.md,
+// Ranjish's call, recorded for Mike): his Crate Cheat tab has NO play-
+// count control at all - only Track Cheat does. This screen keeps its
+// own, independent play-count control anyway (restyled as his radio
+// pills), because the backend feature is real and a DJ choosing "deep
+// cuts" for a crate while Track Cheat stays on "mix" is a genuine,
+// wanted scenario - not a styling gap to silently remove.
 
 import { useEffect, useState } from "react";
 import { buildCrate } from "../api/backendClient";
 import type { SharedSession, CrateTrack } from "../App";
-
-const EXPORT_FORMATS = [
-  { format: "csv" as const, label: "CSV" },
-  { format: "m3u" as const, label: "M3U" },
-  { format: "json" as const, label: "JSON" },
-  { format: "txt" as const, label: "TXT" }
-];
+import type { DerivedTheme } from "../theme/deriveTheme";
+import SectionRule from "../shared/SectionRule";
+import EmptyLib from "../shared/EmptyLib";
+import PlayCountToggle from "../shared/PlayCountToggle";
+import PhasePlaceholder from "../shared/PhasePlaceholder";
+import { CheckboxListHeader } from "../shared/ResultRow";
+import CheckboxTrackRow from "../shared/CheckboxTrackRow";
+import ExportMenu, { type ReadyExportFormat } from "../shared/ExportMenu";
+import { normalizeSmartQuotes } from "../shared/normalizeSmartQuotes";
+import { applySort, handleSort, DEFAULT_SORT_STATE, type SortField, type SortState } from "../shared/sortResults";
+import { cardStyle, lblStyle, inputStyle, buildBtnStyle, sizeBtnStyle, WHITE, GRAY } from "../shared/controlStyles";
 
 // CLAUDE.md's own documented menu (R4) - six sizes, not an arbitrary range.
 const CRATE_SIZES = [10, 25, 50, 100, 150, 200] as const;
@@ -42,35 +48,34 @@ type ResultState =
 
 interface CrateCheatScreenProps {
   sharedSession: SharedSession | null;
-  // docs/decisions/0019: the crate itself is lifted to App.tsx, shared
-  // with Playlist Cheat's "Add To Crate" - this screen replaces the
-  // whole list on a build (source: setPlaylist(deduped)); it does not
-  // own the list.
   crateList: CrateTrack[];
   setCrateList: (next: CrateTrack[]) => void;
+  theme: DerivedTheme;
+  onGoToLibrary: () => void;
 }
 
-export default function CrateCheatScreen({ sharedSession, crateList, setCrateList }: CrateCheatScreenProps): React.JSX.Element {
+export default function CrateCheatScreen({ sharedSession, crateList, setCrateList, theme, onGoToLibrary }: CrateCheatScreenProps): React.JSX.Element {
+  const [libraryCount, setLibraryCount] = useState<number | null>(null);
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<number>(10);
   const [crateVibePrompt, setCrateVibePrompt] = useState("");
   const [playCountMode, setPlayCountMode] = useState("mix");
   const [result, setResult] = useState<ResultState>({ status: "idle" });
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT_STATE);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   // docs/decisions/0017: a TESTING CONTROL, not a real setting - default
   // stays "high" (Anthropic's own default), nothing about ranking,
   // prompts, or pool selection changes.
   const [effort, setEffort] = useState<"high" | "low">("high");
-  // Step 5, piece 8 (Export). Source: every mutation of the crate list
-  // (a fresh build via setPlaylist(deduped), or an append via
-  // spotifyToPlaylist) also resets selection to ALL-true for the
-  // resulting list - never a partial carry-over of a prior manual
-  // deselection. crateList itself can change from code this screen
-  // doesn't own (Playlist Cheat's "Add To Crate ->" lifts straight to
-  // App.tsx), so that reset is driven by crateList itself here, not by
-  // the two call sites that can change it.
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [exportBusy, setExportBusy] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+
+  // Just the count, not the whole library - this screen never needs
+  // real track data client-side, only whether EmptyLib should show.
+  useEffect(() => {
+    window.ccdj.library.getStatus().then((status) => setLibraryCount(status.count));
+  }, []);
 
   useEffect(() => {
     const all: Record<number, boolean> = {};
@@ -80,6 +85,14 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
 
   const isBusy = result.status === "loading";
   const selectedCount = Object.values(selected).filter(Boolean).length;
+  const sortedCrate = applySort(
+    crateList.map((t, origIdx) => ({ ...t, origIdx })),
+    sort
+  );
+
+  function onSort(field: SortField): void {
+    setSort((prev) => handleSort(prev, field));
+  }
 
   function handleSelectAll(): void {
     const all: Record<number, boolean> = {};
@@ -91,7 +104,12 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
     return crateList.filter((_, i) => selected[i]);
   }
 
-  async function handleExportFile(format: "csv" | "m3u" | "json" | "txt"): Promise<void> {
+  function handleExportUnavailable(label: string): void {
+    setExportMessage(`${label} will be available in the desktop app.`);
+    setShowExportMenu(false);
+  }
+
+  async function handleExportFile(format: ReadyExportFormat): Promise<void> {
     const tracks = selectedTracks();
     setExportBusy(true);
     setExportMessage(null);
@@ -106,17 +124,17 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
       setExportMessage(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setExportBusy(false);
+      setShowExportMenu(false);
     }
   }
 
-  // Copy stays local - no real file path is needed for it, so there's
-  // no reason to round-trip through main for this one.
   async function handleCopy(): Promise<void> {
     const text = selectedTracks()
       .map((t) => t.name)
       .join("\n");
     await navigator.clipboard.writeText(text);
     setExportMessage("Copied to clipboard.");
+    setShowExportMenu(false);
   }
 
   async function handleBuildCrate(): Promise<void> {
@@ -140,144 +158,153 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
         return;
       }
       setResult({ status: "done", data });
-      // Source: setPlaylist(deduped) - a build REPLACES the crate, it
-      // does not merge with whatever Playlist Cheat already added.
-      setCrateList(
-        (data.results ?? []).map((r) => ({ trackId: r.trackId, name: r.name, bpm: r.bpm, key: r.key }))
-      );
+      setCrateList((data.results ?? []).map((r) => ({ trackId: r.trackId, name: r.name, bpm: r.bpm, key: r.key })));
     } catch (error) {
       setResult({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
 
+  if (libraryCount === null) {
+    return <p style={{ color: GRAY }}>Loading library...</p>;
+  }
+  if (libraryCount === 0) {
+    return <EmptyLib theme={theme} onGoToLibrary={onGoToLibrary} />;
+  }
+
   return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 5, piece 5: Crate Cheat</h2>
-      <p style={{ fontSize: 13, color: "#666" }}>
-        All the crate-building logic (curated-track/era resolution, context building, filtering, ranking) already
-        lives in the real backend (Phase 3/4) - this screen only sends your prompt, size, and play-count mode, and
-        shows what comes back.
+    <div>
+      {!sharedSession && (
+        <p style={{ fontSize: 11, color: "#a15c00" }}>Connecting to backend session...</p>
+      )}
+      <p style={{ fontSize: 11, color: "#a15c00", marginBottom: "0.5rem" }}>
+        <b>TESTING CONTROL</b> - effort (default stays high; this does not change ranking, prompts, or pool
+        selection):{" "}
+        <select value={effort} onChange={(e) => setEffort(e.target.value as "high" | "low")}>
+          <option value="high">high (default)</option>
+          <option value="low">low</option>
+        </select>
       </p>
 
-      <div>
-        <label>
-          Describe the crate: <br />
+      <SectionRule theme={theme}>Build Your Own Crate From Your Own Words</SectionRule>
+
+      <div style={cardStyle(theme)}>
+        <label style={lblStyle}>Describe The Crate You Want To Build</label>
+        <div style={{ position: "relative" }}>
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. 2000s dance floor heaters"
-            style={{ width: "100%", height: 50, marginTop: "0.3rem" }}
+            onChange={(e) => setPrompt(normalizeSmartQuotes(e.target.value))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!isBusy && libraryCount && prompt.trim() && size) void handleBuildCrate();
+              }
+            }}
+            placeholder="e.g. playlist of 2000s hip hop bangers... deep cuts I haven't played much..."
+            style={{ width: "100%", minHeight: 90, fontSize: 14, padding: "10px 48px 10px 12px", borderRadius: 8, border: "1px solid " + theme.accentAlpha(0.3), background: "rgba(0,0,0,0.6)", color: WHITE, resize: "vertical", boxSizing: "border-box", outline: "none" }}
           />
+          <PhasePlaceholder phase={8} message="Voice input is coming in Phase 8">
+            <button
+              style={{ position: "absolute", bottom: 10, right: 10, width: 32, height: 32, borderRadius: "50%", border: "none", cursor: "pointer", background: "rgba(255,255,255,0.05)", color: GRAY, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              🎤
+            </button>
+          </PhasePlaceholder>
+        </div>
+
+        <label style={{ ...lblStyle, marginTop: 12 }}>
+          Vibe Prompt <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: theme.accentAlpha(0.5) }}>— Optional</span>
         </label>
+        <input
+          value={crateVibePrompt}
+          onChange={(e) => setCrateVibePrompt(normalizeSmartQuotes(e.target.value))}
+          placeholder="e.g. give me redrums, hype intros only, more energy..."
+          style={inputStyle(theme)}
+        />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: GRAY, textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.12em" }}>Tracks</span>
+          {CRATE_SIZES.map((n) => (
+            <button key={n} onClick={() => setSize(n)} style={sizeBtnStyle(theme, size === n)}>
+              {n}
+            </button>
+          ))}
+        </div>
+
+        {/* Deliberate departure from his layout (CLAUDE2.md, recorded for
+            Mike): his Crate Cheat tab has no play-count control at all.
+            Kept here anyway, restyled as his radio pills, since the
+            underlying feature is real and independent of Track Cheat's
+            own setting. */}
+        <div style={{ marginTop: 12 }}>
+          <PlayCountToggle mode={playCountMode} setMode={setPlayCountMode} accent={theme.accent} ia={theme.ia} />
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <button onClick={handleBuildCrate} disabled={isBusy || !prompt.trim() || !size} style={{ ...buildBtnStyle(theme, isBusy || !prompt.trim() || !size), display: "flex", alignItems: "center", gap: 4 }}>
+            {isBusy ? `Building${size > 50 ? ` (${Math.ceil(size / 50)} Batches)` : ""}...` : "Build Crate"}
+          </button>
+        </div>
       </div>
 
-      <div style={{ marginTop: "0.5rem", display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-        <label>
-          Size:{" "}
-          <select value={size} onChange={(e) => setSize(Number(e.target.value))}>
-            {CRATE_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label style={{ color: "#a15c00" }}>
-          <b>TESTING CONTROL</b> - effort:{" "}
-          <select value={effort} onChange={(e) => setEffort(e.target.value as "high" | "low")}>
-            <option value="high">high (default)</option>
-            <option value="low">low</option>
-          </select>
-        </label>
-
-        <label>
-          Play-count mode:{" "}
-          <select value={playCountMode} onChange={(e) => setPlayCountMode(e.target.value)}>
-            <option value="familiar">familiar</option>
-            <option value="mix">mix</option>
-            <option value="deep">deep</option>
-          </select>
-        </label>
-      </div>
-
-      <div style={{ marginTop: "0.5rem" }}>
-        <label>
-          Optional secondary vibe:{" "}
-          <input
-            value={crateVibePrompt}
-            onChange={(e) => setCrateVibePrompt(e.target.value)}
-            placeholder="e.g. prefer redrums"
-            style={{ width: "50%" }}
-          />
-        </label>
-      </div>
-
-      <button onClick={handleBuildCrate} disabled={!prompt.trim() || isBusy} style={{ marginTop: "0.75rem" }}>
-        {isBusy ? "Building crate... (can take 10-90s)" : "Build Crate"}
-      </button>
-
-      {result.status === "error" && <p style={{ color: "#c62828" }}>Error: {result.message}</p>}
+      {result.status === "error" && <p style={{ color: "#e03c3c", fontSize: 13 }}>Error: {result.message}</p>}
       {result.status === "done" && (
-        <p style={{ fontSize: 13, color: "#666", marginTop: "0.5rem" }}>
-          Last build: {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
+        <p style={{ fontSize: 12, color: GRAY, marginTop: "0.5rem" }}>
+          {result.data.returned ?? 0} of {result.data.requested ?? 0} requested &middot; candidate pool{" "}
           {result.data.candidatePoolSize ?? 0}
           {result.data.shortfallReason && (
             <>
               {" "}
-              &middot; <span style={{ color: "#c62828" }}>shortfall: {result.data.shortfallReason}</span>
+              &middot; <span style={{ color: "#e03c3c" }}>shortfall: {result.data.shortfallReason}</span>
             </>
           )}
-          {result.data.knowledgeCallMade && <> &middot; knowledge call: {result.data.knowledgeCallMade}</>}
-          {" "}&middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"} &middot; effort{" "}
-          {result.data.effortUsed ?? "n/a"}
-          {result.data.retried && (
-            <span style={{ color: "#a15c00" }}>
-              {" "}
-              &middot; retried automatically (reason: {result.data.retryReason}) - used reduced thinking
-            </span>
-          )}
+          {" "}&middot; {result.data.simulated === false ? "REAL AI" : "simulated AI"}
         </p>
       )}
 
-      {/* docs/decisions/0019: this is the crate itself - persists across
-          builds, and across anything Playlist Cheat adds to it, same as
-          Mike's own playlist state. Shown independently of the last
-          build's status above, since it can hold tracks a build never
-          produced (added from Playlist Cheat) or can be non-empty even
-          when idle/loading/erroring. */}
-      <h3 style={{ marginTop: "1rem" }}>Current crate ({crateList.length})</h3>
-      {crateList.length === 0 && <p style={{ color: "#888", fontSize: 13 }}>Nothing in the crate yet.</p>}
+      {crateList.length === 0 && <p style={{ color: GRAY, fontSize: 13, marginTop: "1rem" }}>Nothing in the crate yet.</p>}
 
       {crateList.length > 0 && (
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-          <button onClick={handleSelectAll}>Select All</button>
-          <span style={{ fontSize: 13, color: "#666" }}>{selectedCount} of {crateList.length} selected</span>
-          {EXPORT_FORMATS.map((f) => (
-            <button key={f.format} onClick={() => handleExportFile(f.format)} disabled={exportBusy || selectedCount === 0}>
-              Export {f.label}
-            </button>
-          ))}
-          <button onClick={handleCopy} disabled={selectedCount === 0}>
-            Copy
-          </button>
+        <div style={{ marginTop: "1.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: theme.accent, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+              {selectedCount} / {crateList.length} Selected
+            </span>
+            <div style={{ display: "flex", gap: 8, position: "relative" }}>
+              <button onClick={handleSelectAll} style={{ fontSize: 12, padding: "6px 14px", background: "transparent", border: "1px solid " + theme.accentAlpha(0.3), borderRadius: 8, color: theme.accent, cursor: "pointer" }}>
+                Select All
+              </button>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setShowExportMenu((m) => !m)}
+                  disabled={selectedCount === 0}
+                  style={{ fontSize: 12, padding: "6px 14px", background: "transparent", border: "1px solid " + theme.ia(0.5), borderRadius: 8, color: theme.accent, cursor: "pointer" }}
+                >
+                  Export Crate ▾
+                </button>
+                {showExportMenu && (
+                  <ExportMenu theme={theme} busy={exportBusy} onExportFile={handleExportFile} onCopy={handleCopy} onUnavailable={handleExportUnavailable} />
+                )}
+              </div>
+            </div>
+          </div>
+          {exportMessage && <p style={{ fontSize: 12, color: GRAY, textAlign: "right" }}>{exportMessage}</p>}
+
+          <div style={{ border: "1px solid " + theme.accentAlpha(0.15), borderRadius: 12, overflow: "hidden" }}>
+            <CheckboxListHeader sortField={sort.field} sortDir={sort.dir} onSort={onSort} theme={theme} />
+            {sortedCrate.map((t, i) => (
+              <CheckboxTrackRow
+                key={t.origIdx}
+                t={t}
+                isSelected={!!selected[t.origIdx]}
+                theme={theme}
+                rowBg={i % 2 === 0 ? theme.rowEven : theme.rowOdd}
+                onToggle={() => setSelected((prev) => ({ ...prev, [t.origIdx]: !prev[t.origIdx] }))}
+                dimOpacity={0.35}
+              />
+            ))}
+          </div>
         </div>
       )}
-      {exportMessage && <p style={{ fontSize: 13, color: "#666" }}>{exportMessage}</p>}
-
-      <ol style={{ paddingLeft: "1.2rem", fontSize: 13 }}>
-        {/* Index, not trackId, as the key - deliberately not deduped
-            (matching Mike), so the same trackId can legitimately appear
-            twice. */}
-        {crateList.map((t, i) => (
-          <li key={i}>
-            <label>
-              <input type="checkbox" checked={!!selected[i]} onChange={() => setSelected((prev) => ({ ...prev, [i]: !prev[i] }))} />{" "}
-              {t.name} - {t.bpm} bpm / {t.key}
-            </label>
-          </li>
-        ))}
-      </ol>
-    </section>
+    </div>
   );
 }

@@ -9,15 +9,20 @@
 // by version-tag-stripped name so "Song (Clean)" and "Song (Clean) [v2]"
 // don't both show up as separate candidates.
 //
-// Deliberately NOT ported in this piece (CLAUDE.md Top Rule 5 - tracked,
-// not silently dropped): the Vibe Prompt type-lock filter (spotifyPrompt/
-// styleProfile hard-filtering each pool to a requested edit type) and the
-// debug-line UI trace. Both are real behavior from the source, left for
-// a follow-up piece rather than bundled into the first matching pass.
+// Vibe Prompt type-lock filter (piece 15, 2026-11-12): source hard-
+// filters each pool to only the edits matching a requested type
+// (lines 4710-4718) after the dedup pass below. Ported below using the
+// same getEditDescriptor/typeTokenMatches already proven server-side
+// for Track/Crate Cheat's own Vibe Prompts.
+//
+// Still deliberately NOT ported in this piece: the debug-line UI trace
+// (source's setSpotifyDebug) - gated behind `false&&` in his own render
+// anyway (line 5850), so there's nothing visible to match.
 
 import { normalizeForMatch } from "./normalizeForMatch.ts";
 import { getRawTitleFromName } from "./getRawTitleFromName.ts";
 import { fuzzyEq } from "./fuzzyMatch.ts";
+import { getEditDescriptor, typeTokenMatches } from "./typeLock.ts";
 
 const TITLE_MATCH_STOPWORDS = new Set([
   "you", "the", "a", "an", "and", "or", "it", "is", "are", "was", "in", "on", "at", "to", "of", "for",
@@ -77,7 +82,7 @@ export interface CandidatePool {
   dedupedCandidates: CcdjLibraryRow[];
 }
 
-export function buildCandidatePools(sourceTracks: SourceTrack[], library: CcdjLibraryRow[]): CandidatePool[] {
+export function buildCandidatePools(sourceTracks: SourceTrack[], library: CcdjLibraryRow[], typeLock: string[] | null = null): CandidatePool[] {
   return sourceTracks.map((st) => {
     const rawName = st.name || "";
     // Spotify (and some plain-text sources) commonly tack a version tag
@@ -166,6 +171,18 @@ export function buildCandidatePools(sourceTracks: SourceTrack[], library: CcdjLi
         if (seenNames.has(normalized)) return false;
         seenNames.add(normalized);
         return true;
+      });
+    }
+
+    if (typeLock && typeLock.length) {
+      // Hard filter, same zero-tolerance philosophy as Track/Crate
+      // Cheat's type lock (source lines 4710-4717). If this particular
+      // song has no edit matching the requested type, zero matches is
+      // the honest result - the DJ doesn't have an EDM/house version of
+      // THIS song - never a substitution with some other edit.
+      dedupedCandidates = dedupedCandidates.filter((t) => {
+        const ed = getEditDescriptor(t.displayName);
+        return ed !== "" && typeLock.some((k) => typeTokenMatches(ed, k));
       });
     }
 

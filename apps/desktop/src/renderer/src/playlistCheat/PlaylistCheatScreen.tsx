@@ -1,90 +1,197 @@
-// Phase 5, step 5 piece 6 - Playlist Cheat core (plain-text only).
+// Phase 5, step 5 piece 6 (core) + piece 8 (export) + piece 13, Stage
+// 2b (real styling) + Stage 2b state-lift fix + piece 14 (export menu,
+// see shared/ExportMenu.tsx) + piece 15 (Vibe Prompt, see
+// ./typeLock.ts) (2026-11-12).
+//
+// Piece 15: the Vibe Prompt field was entirely missing from Stage 2b's
+// restyle - found during the real-window check, 2026-11-12. Ported his
+// exact placeholder/position (between the text-file import block and
+// Results Per Track, source lines 5842-5845) and the real hard type-
+// lock filter behind it (buildCandidatePools' new typeLock param,
+// ./typeLock.ts) - not just the input box. One correction to how this
+// was asked for: it does NOT thread through to apps/server, because
+// nothing on this screen calls the backend at all (CLAUDE.md 5.4 - the
+// plain-text/file matching path is local-only by design, same as
+// before this piece). The filter runs client-side, same place as the
+// rest of this screen's matching logic.
 //
 // CLAUDE.md Section 5.4 explicitly lists "Playlist Cheat local matcher"
-// under client-side, unprotected logic - unlike Track Cheat and Crate
-// Cheat, this screen makes NO call to apps/server at all. It fetches the
-// already-imported library once (the same window.ccdj.library.getAllTracks
-// the Library screen already uses) and does all matching locally in this
-// process.
+// under client-side, unprotected logic - this screen makes NO call to
+// apps/server at all for the plain-text/file path. It fetches the
+// already-imported library once and does all matching locally.
 //
-// Deliberately out of scope for this piece (CLAUDE.md's own Phase 6,
-// "Spotify via backend" - needs D2, secret rotation, and a proxy audit,
-// none of which have happened): Spotify URL import. Only the plain-text/
-// .txt path is built here. Also deferred, same as Track Cheat's own
-// piece-3/piece-4 split: the Vibe Prompt type-lock and the cross-build
-// "don't repeat this session" variety tracking (both real source
-// behavior - see buildCandidatePools.ts's header comment).
+// Render order matches the source exactly (reference 5828-5882): rule-
+// line -> card (Spotify URL [placeholder], Import From Text File [real
+// drop/browse, ported], Vibe Prompt [real, piece 15], Results Per Track
+// [radio pills], Build Crate) -> selected-count/Select All/Export
+// Crate/Add To Crate -> results list.
+//
+// Deliberate addition to his design, recorded in CLAUDE2.md (Ranjish's
+// call, flagged for Mike alongside the file-vs-paste decision): his
+// text-file import is file-drop/browse ONLY. This screen keeps the
+// paste textarea we already had AND adds his real file-drop/browse
+// zone - both feed the exact same plainText state and the exact same
+// matching logic, so a DJ can paste from an email or drop a .txt file,
+// whichever is actually in front of them. Additive, not a fork.
+//
+// Stage 2b state-lift fix (2026-11-12, "Finding 3" from the real-window
+// check): plainText/resultCount/results/selected used to be local
+// useState here, so switching tabs and back (App.tsx unmounts this
+// component on every tab change) wiped a DJ's matched results and
+// selections. Source never had this problem because its whole app is
+// one component that never unmounts between tabs. Fixed by lifting
+// this state to App.tsx (PlaylistCheatWork, same pattern as crateList -
+// docs/decisions/0019) and receiving it as props instead. The library
+// fetch itself (just reference data, cheap to redo) and transient UI-
+// only state (export menu open, drag-over highlight, export status
+// message, sort order) stay local - losing those on tab-away is
+// cosmetic, not data loss, same judgment call already made for Crate
+// Cheat's own still-local prompt/sort/showExportMenu (CLAUDE2.md).
+//
+// Same piece also fixes two bugs the state-lift work exposed:
+// - Deselect: onToggle used to only ever ASSIGN a selection, never
+//   clear one - a DJ could never un-pick a song's match. Source's
+//   handlePlaylistMatchToggle (line 1973) clears the key first and only
+//   re-adds it if it wasn't already selected, so clicking the selected
+//   match again drops that song to zero. Ported that exactly.
+// - Select All: was a no-op, because every song already gets a default
+//   selection the instant results come in (matches source's own
+//   sel2[ri+"-0"]=true default, lines 4926/4972 - not a divergence) and
+//   nothing could ever become deselected to restore. Now that deselect
+//   is possible, Select All restores each song's current-or-default
+//   pick. Deliberately NOT porting source's own Select All (line 5866,
+//   setting every match of every song true at once) - that bypasses his
+//   own one-per-song click rule and is the same inconsistency already
+//   flagged in docs/QUESTIONS.md as a suspected source bug. Ranjish's
+//   call (2026-11-12): ship the restore-only version, keep the question
+//   open for Mike rather than copy a bug we already doubt is intended.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { matchPlaylistFromPlainText } from "./matchPlaylist.ts";
-import type { MatchedResult } from "./matchPlaylist.ts";
 import { buildPlaylistExportData } from "./buildPlaylistExportData.ts";
-import type { CrateTrack } from "../App";
+import type { CrateTrack, PlaylistCheatWork } from "../App";
+import type { DerivedTheme } from "../theme/deriveTheme";
+import SectionRule from "../shared/SectionRule";
+import EmptyLib from "../shared/EmptyLib";
+import PhasePlaceholder from "../shared/PhasePlaceholder";
+import RadioPillPicker, { type RadioPillOption } from "../shared/RadioPillPicker";
+import { CheckboxListHeader } from "../shared/ResultRow";
+import CheckboxTrackRow from "../shared/CheckboxTrackRow";
+import ExportMenu, { type ReadyExportFormat } from "../shared/ExportMenu";
+import { restoreSelectAll } from "./selectAll.ts";
+import { applySort, handleSort, DEFAULT_SORT_STATE, type SortField, type SortState } from "../shared/sortResults";
+import { cardStyle, lblStyle, inputStyle, buildBtnStyle, WHITE, GRAY } from "../shared/controlStyles";
 
-const RESULT_COUNTS = [1, 3, 5] as const;
-
-const EXPORT_FORMATS = [
-  { format: "csv" as const, label: "CSV" },
-  { format: "m3u" as const, label: "M3U" },
-  { format: "json" as const, label: "JSON" },
-  { format: "txt" as const, label: "TXT" }
+// Source line 419, confirmed verbatim.
+const RESULT_OPTIONS: readonly RadioPillOption[] = [
+  { value: 1, label: "1 Match", desc: "Best match only. I trust you." },
+  { value: 3, label: "3 Matches", desc: "Give me some options." },
+  { value: 5, label: "5 Matches", desc: "I'm shopping my own groceries." }
 ];
 
-type ResultState =
-  | { status: "idle" }
-  | { status: "loadingLibrary" }
-  | { status: "ready"; library: CcdjLibraryRow[] }
-  | { status: "matched"; library: CcdjLibraryRow[]; results: MatchedResult[] };
+type LibraryState = { status: "loading" } | { status: "ready"; library: CcdjLibraryRow[] };
 
 interface PlaylistCheatScreenProps {
-  // docs/decisions/0019: source's "Add To Crate ->" (spotifyToPlaylist) -
-  // adds whichever matches are currently selected into Crate Cheat's
-  // own list, without erasing what's already there. CLAUDE.md never
-  // documented this feature; confirmed directly against the reference
-  // source instead (docs/QUESTIONS.md).
   onAddToCrate: (tracks: CrateTrack[]) => void;
+  work: PlaylistCheatWork;
+  setWork: (updater: PlaylistCheatWork | ((prev: PlaylistCheatWork) => PlaylistCheatWork)) => void;
+  theme: DerivedTheme;
+  onGoToLibrary: () => void;
 }
 
-export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScreenProps): React.JSX.Element {
-  const [plainText, setPlainText] = useState("");
-  const [resultCount, setResultCount] = useState<number>(3);
-  const [state, setState] = useState<ResultState>({ status: "loadingLibrary" });
-  // Keyed by song index -> the index within that song's matches the DJ
-  // has selected. Selecting a different match for the same song
-  // overwrites this entry rather than adding to it - that IS "one version
-  // per song" (CLAUDE.md 3.2): the data shape makes a second selection
-  // for the same song impossible, not just visually discouraged.
-  const [selected, setSelected] = useState<Record<number, number>>({});
+export default function PlaylistCheatScreen({ onAddToCrate, work, setWork, theme, onGoToLibrary }: PlaylistCheatScreenProps): React.JSX.Element {
+  const [libraryState, setLibraryState] = useState<LibraryState>({ status: "loading" });
   const [exportBusy, setExportBusy] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT_STATE);
+  // Source's spRef (line 1337/5862) - scrolls the results into view
+  // after a build, same as both buildFromSpotify (line 4929) and
+  // buildFromPlainText (line 4975) do. Without it a DJ with a tall card
+  // above (file loaded, Vibe Prompt filled in) could easily not notice
+  // results landed below the fold.
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    window.ccdj.library.getAllTracks().then((library) => setState({ status: "ready", library }));
+    window.ccdj.library.getAllTracks().then((library) => setLibraryState({ status: "ready", library }));
   }, []);
 
-  const library = state.status === "ready" || state.status === "matched" ? state.library : [];
-  const results = state.status === "matched" ? state.results : [];
-  const isBusy = state.status === "loadingLibrary";
+  const library = libraryState.status === "ready" ? libraryState.library : [];
+  const isBusy = libraryState.status === "loading";
+  const { results, selected } = work;
+
+  function setPlainText(plainText: string): void {
+    setWork((w) => ({ ...w, plainText }));
+  }
+
+  function setResultCount(resultCount: number): void {
+    setWork((w) => ({ ...w, resultCount }));
+  }
+
+  function setVibePromptText(vibePromptText: string): void {
+    setWork((w) => ({ ...w, vibePromptText }));
+  }
 
   function handleMatch(): void {
-    if (!plainText.trim() || state.status === "loadingLibrary") return;
-    const matched = matchPlaylistFromPlainText(plainText, library, resultCount);
-    setState({ status: "matched", library, results: matched });
+    if (!work.plainText.trim() || isBusy) return;
+    const matched = matchPlaylistFromPlainText(work.plainText, library, work.resultCount, work.vibePromptText);
     const defaults: Record<number, number> = {};
     matched.forEach((r, i) => {
       if (r.matches.length) defaults[i] = 0;
     });
-    setSelected(defaults);
+    setWork((w) => ({ ...w, results: matched, selected: defaults }));
+    // Same 100ms delay as source (lines 4929/4975) - lets the results
+    // list actually render before measuring where to scroll to.
+    setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+  }
+
+  function loadTextFile(file: File): void {
+    if (!file.name.endsWith(".txt")) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setPlainText(String(ev.target?.result ?? ""));
+    reader.readAsText(file);
   }
 
   function selectedCount(): number {
     return Object.keys(selected).length;
   }
 
-  // Source: spotifyToPlaylist - collects the currently-selected match
-  // per song and hands them to Crate Cheat's list. No dedup here either
-  // (matching the source exactly) - adding the same track twice, on
-  // purpose or by accident, is allowed, same as his app.
+  // Select All is restore-only (see the header comment above) - it has
+  // nothing to do whenever every matched song already has a selection,
+  // which is true the instant a build finishes (handleMatch's own
+  // defaults). Dimming/disabling it in that state (Ranjish's call,
+  // 2026-11-12) so its inertness reads as "nothing to restore," not as
+  // a broken button - confirmed by reproduction in test/selectAll.test.js
+  // that clicking it in that state is otherwise visually a no-op.
+  const hasDeselected = results.some((r, ri) => r.matches.length > 0 && selected[ri] === undefined);
+
+  // Source's handlePlaylistMatchToggle (line 1973): clear this song's
+  // other match keys, then only re-add the clicked one if it wasn't
+  // already selected - so clicking the selected match again deselects
+  // the whole song, same as his.
+  function handleToggle(ri: number, mi: number): void {
+    setWork((w) => {
+      const next = { ...w.selected };
+      if (next[ri] === mi) {
+        delete next[ri];
+      } else {
+        next[ri] = mi;
+      }
+      return { ...w, selected: next };
+    });
+  }
+
+  // Restore-only Select All (Ranjish's call, 2026-11-12): re-selects
+  // every matched song's current pick, or its default first match if it
+  // was deselected. Deliberately NOT his literal "select every match of
+  // every song at once" (source line 5866) - that conflicts with his own
+  // one-per-song click rule and is an open suspected bug (docs/
+  // QUESTIONS.md), not something to copy.
+  function handleSelectAll(): void {
+    setWork((w) => ({ ...w, selected: restoreSelectAll(w.results, w.selected) }));
+  }
+
   function handleAddToCrate(): void {
     const tracks: CrateTrack[] = [];
     results.forEach((r, ri) => {
@@ -97,13 +204,12 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
     if (tracks.length) onAddToCrate(tracks);
   }
 
-  // Step 5, piece 8 (Export). Source: handleExportSpotify - CSV/M3U/TXT/
-  // Copy only ever carry the currently-selected match per song; JSON
-  // alone carries the richer source+all-candidates list. Built here,
-  // not in main, since this screen already has everything it needs
-  // (no real location is ever included for this screen's export - see
-  // buildPlaylistExportData.ts).
-  async function handleExportFile(format: "csv" | "m3u" | "json" | "txt"): Promise<void> {
+  function handleExportUnavailable(label: string): void {
+    setExportMessage(`${label} will be available in the desktop app.`);
+    setShowExportMenu(false);
+  }
+
+  async function handleExportFile(format: ReadyExportFormat): Promise<void> {
     const data = buildPlaylistExportData(results, selected);
     setExportBusy(true);
     setExportMessage(null);
@@ -114,6 +220,7 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
       setExportMessage(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setExportBusy(false);
+      setShowExportMenu(false);
     }
   }
 
@@ -121,114 +228,187 @@ export default function PlaylistCheatScreen({ onAddToCrate }: PlaylistCheatScree
     const { tracks } = buildPlaylistExportData(results, selected);
     await navigator.clipboard.writeText(tracks.map((t) => t.name).join("\n"));
     setExportMessage("Copied to clipboard.");
+    setShowExportMenu(false);
+  }
+
+  function onSort(field: SortField): void {
+    setSort((prev) => handleSort(prev, field));
+  }
+
+  if (!isBusy && library.length === 0) {
+    return <EmptyLib theme={theme} onGoToLibrary={onGoToLibrary} />;
+  }
+  if (isBusy) {
+    return <p style={{ color: GRAY }}>Loading library...</p>;
   }
 
   return (
-    <section style={{ border: "2px solid #888", borderRadius: 8, padding: "1rem", marginTop: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>Step 5, piece 6: Playlist Cheat (plain text)</h2>
-      <p style={{ fontSize: 13, color: "#666" }}>
-        Paste or type a playlist, one song per line ("Artist - Title", or just a title). Matched entirely against
-        your own library - no AI, no network call. Spotify URL import is separate work (Phase 6 - needs Spotify's
-        secret rotated and a decision on accounts first).
-      </p>
+    <div>
+      <SectionRule theme={theme}>Build Your Own Crate From Spotify Playlist Or Text File</SectionRule>
 
-      {state.status === "loadingLibrary" && <p style={{ color: "#666" }}>Loading your library...</p>}
-      {(state.status === "ready" || state.status === "matched") && library.length === 0 && (
-        <p style={{ color: "#c62828" }}>No library imported yet - import one on the Library screen first.</p>
-      )}
+      <div style={cardStyle(theme)}>
+        <PhasePlaceholder phase={6} message="Real Spotify playlist import is coming in Phase 6">
+          <label style={lblStyle}>Spotify Playlist URL</label>
+          <input placeholder="https://open.spotify.com/playlist/..." style={{ ...inputStyle(theme), marginBottom: 16 }} readOnly />
+        </PhasePlaceholder>
 
-      <div>
-        <label>
-          Playlist:
-          <br />
-          <textarea
-            value={plainText}
-            onChange={(e) => setPlainText(e.target.value)}
-            placeholder={"Daft Punk - One More Time\nBlackstreet - No Diggity"}
-            style={{ width: "100%", height: 100, marginTop: "0.3rem" }}
-          />
+        <label style={lblStyle}>Import From Text File</label>
+        <p style={{ fontSize: 11, color: GRAY, margin: "0 0 8px", lineHeight: 1.5 }}>
+          One track per line, "Artist - Title" — runs through the exact same matching logic as a Spotify playlist.
+        </p>
+        <input
+          type="file"
+          accept=".txt"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) loadTextFile(f);
+          }}
+          style={{ display: "none" }}
+          id="crateTextFileInput"
+        />
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const f = e.dataTransfer.files[0];
+            if (f) loadTextFile(f);
+          }}
+          style={{
+            display: "inline-block",
+            padding: "10px 16px",
+            marginBottom: 16,
+            borderRadius: 8,
+            border: "1px dashed " + (dragOver ? theme.accent : theme.accentAlpha(0.4)),
+            background: dragOver ? theme.accentAlpha(0.1) : "rgba(0,0,0,0.3)",
+            color: work.plainText.trim() ? theme.accent : GRAY,
+            fontSize: 12,
+            fontWeight: 600,
+            textAlign: "left",
+            cursor: "pointer",
+            boxSizing: "border-box",
+            transition: "all 0.2s",
+            width: "100%"
+          }}
+        >
+          <label htmlFor="crateTextFileInput" style={{ display: "block", cursor: "pointer" }}>
+            {work.plainText.trim() ? `✓ Text file loaded — ${work.plainText.trim().split("\n").filter((l) => l.trim()).length} lines` : "📁 Drag .txt file here or click to browse"}
+          </label>
+        </div>
+
+        {/* Our own addition alongside his file-only mechanism (CLAUDE2.md,
+            flagged for Mike) - same plainText state, same matching logic
+            either way. */}
+        <label style={lblStyle}>Or Paste Directly</label>
+        <textarea
+          value={work.plainText}
+          onChange={(e) => setPlainText(e.target.value)}
+          placeholder={"Daft Punk - One More Time\nBlackstreet - No Diggity"}
+          style={{ width: "100%", minHeight: 80, fontSize: 14, padding: "10px 12px", borderRadius: 8, border: "1px solid " + theme.accentAlpha(0.3), background: "rgba(0,0,0,0.6)", color: WHITE, resize: "vertical", boxSizing: "border-box", outline: "none", marginBottom: 16 }}
+        />
+
+        {/* Source line 5842-5843: Vibe Prompt sits between the text-file
+            import block and Results Per Track. No normalizeSmartQuotes
+            here - checked directly, his spotifyPrompt input (unlike
+            Crate Cheat's prompt/crateVibePrompt) never calls it. */}
+        <label style={lblStyle}>
+          Vibe Prompt <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: theme.accentAlpha(0.5) }}>— Optional</span>
         </label>
+        <input
+          value={work.vibePromptText}
+          onChange={(e) => setVibePromptText(e.target.value)}
+          placeholder="e.g. give me redrums, hype intros only, more energy..."
+          style={{ ...inputStyle(theme), marginBottom: 16 }}
+        />
+
+        <label style={lblStyle}>Results Per Track</label>
+        <RadioPillPicker options={RESULT_OPTIONS} value={work.resultCount} onChange={setResultCount} theme={theme} disabled={!work.plainText.trim()} />
+
+        <button onClick={handleMatch} disabled={!work.plainText.trim()} style={{ ...buildBtnStyle(theme, !work.plainText.trim()), width: "100%" }}>
+          Build Crate
+        </button>
       </div>
 
-      <div style={{ marginTop: "0.5rem" }}>
-        <label>
-          Versions per song:{" "}
-          <select value={resultCount} onChange={(e) => setResultCount(Number(e.target.value))}>
-            {RESULT_COUNTS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <button onClick={handleMatch} disabled={!plainText.trim() || isBusy} style={{ marginTop: "0.75rem" }}>
-        Match against my library
-      </button>
-
-      {state.status === "matched" && (
-        <div style={{ marginTop: "0.75rem" }}>
-          <p style={{ fontSize: 13, color: "#666" }}>
-            {results.filter((r) => r.matches.length > 0).length} of {results.length} matched &middot;{" "}
-            {selectedCount()} selected
-          </p>
-          <button onClick={handleAddToCrate} disabled={selectedCount() === 0}>
-            Add To Crate →
-          </button>
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", margin: "0.5rem 0" }}>
-            {EXPORT_FORMATS.map((f) => (
-              <button key={f.format} onClick={() => handleExportFile(f.format)} disabled={exportBusy || selectedCount() === 0}>
-                Export {f.label}
+      {results.length > 0 && (
+        <div ref={resultsRef} style={{ marginTop: "1.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: theme.accent, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+              {selectedCount()} / {results.reduce((sum, r) => sum + r.matches.length, 0)} Selected
+            </span>
+            <div style={{ display: "flex", gap: 8, position: "relative" }}>
+              <button
+                onClick={handleSelectAll}
+                disabled={!hasDeselected}
+                title={hasDeselected ? undefined : "Nothing deselected to restore"}
+                style={{ fontSize: 12, padding: "6px 14px", background: "transparent", border: "1px solid " + theme.accentAlpha(0.3), borderRadius: 8, color: theme.accent, cursor: hasDeselected ? "pointer" : "not-allowed", opacity: hasDeselected ? 1 : 0.4 }}
+              >
+                Select All
               </button>
-            ))}
-            <button onClick={handleCopy} disabled={selectedCount() === 0}>
-              Copy
-            </button>
-          </div>
-          {exportMessage && <p style={{ fontSize: 13, color: "#666" }}>{exportMessage}</p>}
-          <ol style={{ paddingLeft: "1.2rem" }}>
-            {results.map((r, ri) => (
-              <li key={ri} style={{ marginBottom: "0.5rem" }}>
-                {r.sourceArtist ? `${r.sourceArtist} - ${r.sourceName}` : r.sourceName}
-                {r.matches.length === 0 ? (
-                  // docs/decisions/0014: these are two different situations
-                  // and the wording must not conflate them. No " - " in the
-                  // pasted line means the parser could not identify a
-                  // separate artist/title (sourceArtist is blank) - honest
-                  // phrasing says so instead of claiming the DJ doesn't own
-                  // the song, which assumes a title was correctly found.
-                  // Only when sourceArtist is non-blank do we actually know
-                  // what title was searched for, so only then is "no match
-                  // in your library" a claim this screen can stand behind.
-                  <span style={{ color: "#c62828" }}>
-                    {" - "}
-                    {r.sourceArtist === ""
-                      ? "no title found in this line - try \"Artist - Title\" or just the title"
-                      : "no match in your library"}
-                  </span>
-                ) : (
-                  <ul style={{ paddingLeft: "1.2rem" }}>
-                    {r.matches.map((m, mi) => (
-                      <li key={m.id}>
-                        <label>
-                          <input
-                            type="radio"
-                            name={`song-${ri}`}
-                            checked={selected[ri] === mi}
-                            onChange={() => setSelected((prev) => ({ ...prev, [ri]: mi }))}
-                          />{" "}
-                          {m.displayName} - {m.bpm} bpm / {m.key}
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setShowExportMenu((m) => !m)}
+                  disabled={selectedCount() === 0}
+                  style={{ fontSize: 12, padding: "6px 14px", background: "transparent", border: "1px solid " + theme.ia(0.5), borderRadius: 8, color: theme.accent, cursor: "pointer" }}
+                >
+                  Export Crate
+                </button>
+                {showExportMenu && (
+                  <ExportMenu theme={theme} busy={exportBusy} onExportFile={handleExportFile} onCopy={handleCopy} onUnavailable={handleExportUnavailable} />
                 )}
-              </li>
+              </div>
+              <button
+                onClick={handleAddToCrate}
+                disabled={selectedCount() === 0}
+                style={{ fontSize: 12, padding: "6px 14px", background: "transparent", border: "1px solid " + theme.ia(0.5), borderRadius: 8, color: theme.accent, cursor: "pointer" }}
+              >
+                Add To Crate →
+              </button>
+            </div>
+          </div>
+          {exportMessage && <p style={{ fontSize: 12, color: GRAY, textAlign: "right" }}>{exportMessage}</p>}
+
+          <div style={{ border: "1px solid " + theme.accentAlpha(0.15), borderRadius: 12, overflow: "hidden" }}>
+            <CheckboxListHeader sortField={sort.field} sortDir={sort.dir} onSort={onSort} theme={theme} />
+            {results.map((r, ri) => (
+              <div key={ri}>
+                <div style={{ padding: "8px 14px", background: "rgba(113,228,1,0.06)", borderBottom: "1px solid " + theme.accentAlpha(0.1) }}>
+                  <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: theme.accentAlpha(0.7), textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    {r.sourceArtist && <span style={{ color: GRAY, fontWeight: 400, textTransform: "none" }}>{r.sourceArtist} — </span>}
+                    {r.sourceName}
+                  </p>
+                </div>
+                {r.matches.length === 0 ? (
+                  <div style={{ padding: "10px 28px", background: theme.rowEven, borderBottom: "1px solid " + theme.borderCol }}>
+                    <p style={{ margin: 0, fontSize: 12, color: GRAY, fontStyle: "italic" }}>
+                      {r.sourceArtist === "" ? "No Title Found In This Line" : "No Results Found In Your Library"}
+                    </p>
+                  </div>
+                ) : (
+                  applySort(
+                    r.matches.map((m, mi) => ({ name: m.displayName, bpm: m.bpm, key: m.key, mi })),
+                    sort
+                  ).map((m, i) => (
+                    <CheckboxTrackRow
+                      key={m.mi}
+                      t={m}
+                      isSelected={selected[ri] === m.mi}
+                      theme={theme}
+                      rowBg={i % 2 === 0 ? theme.rowEven : theme.rowOdd}
+                      onToggle={() => handleToggle(ri, m.mi)}
+                      indent
+                      dimOpacity={0.45}
+                    />
+                  ))
+                )}
+              </div>
             ))}
-          </ol>
+          </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }

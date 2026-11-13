@@ -19,6 +19,7 @@ import DuplicateFinderScreen from "./duplicateFinder/DuplicateFinderScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
+import type { MatchedResult } from "./playlistCheat/matchPlaylist.ts";
 import SettingsScreen from "./settings/SettingsScreen";
 import AppHeader from "./header/AppHeader";
 import AccountTab from "./account/AccountTab";
@@ -50,6 +51,24 @@ export interface CrateTrack {
   name: string;
   bpm: number;
   key: string;
+}
+
+// Stage 2b fix (2026-11-12, "Finding 3"): source holds spotifyResults/
+// spotifySelected/plainTextPlaylist/spotifyResultCount as top-level App
+// state (lines 1240/1052/1043 area) because its whole UI is one
+// component that never unmounts between tabs. Our split-screen
+// architecture DOES unmount PlaylistCheatScreen on every tab change
+// ({tab===1 && <PlaylistCheatScreen/>}), so without lifting this the
+// exact same way crateList already is (docs/decisions/0019), a DJ's
+// matched results and selections vanished the instant they looked at
+// another tab. Lifted here for the same reason sharedSession/crateList
+// are: PlaylistCheatScreen needs this to survive its own unmount.
+export interface PlaylistCheatWork {
+  plainText: string;
+  resultCount: number;
+  vibePromptText: string;
+  results: MatchedResult[];
+  selected: Record<number, number>;
 }
 
 type Check = {
@@ -122,6 +141,13 @@ export default function App(): React.JSX.Element {
   const [libraryRefreshSignal, setLibraryRefreshSignal] = useState(0);
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
   const [crateList, setCrateList] = useState<CrateTrack[]>([]);
+  const [playlistCheatWork, setPlaylistCheatWork] = useState<PlaylistCheatWork>({
+    plainText: "",
+    resultCount: 3,
+    vibePromptText: "",
+    results: [],
+    selected: {}
+  });
 
   useEffect(() => {
     window.ccdj.getAppVersion().then(setAppVersion);
@@ -199,9 +225,24 @@ export default function App(): React.JSX.Element {
       <main style={{ padding: "1.5rem", maxWidth: 720, margin: "0 auto" }}>
         {tab === 0 && <TrackCheatScreen sharedSession={sharedSession} gigMode={gigMode} setGigMode={setGigMode} theme={derived} onGoToLibrary={() => setTab(3)} />}
 
-        {tab === 1 && <PlaylistCheatScreen onAddToCrate={(tracks) => setCrateList((prev) => [...prev, ...tracks])} />}
+        {tab === 1 && (
+          <PlaylistCheatScreen
+            // Source's spotifyToPlaylist (line 4980) does setTab(2) right
+            // after adding - jumps the DJ to Crate Cheat to see what just
+            // landed, rather than leaving them on Playlist Cheat wondering
+            // if the click did anything. Stage 2b fix (2026-11-12).
+            onAddToCrate={(tracks) => {
+              setCrateList((prev) => [...prev, ...tracks]);
+              setTab(2);
+            }}
+            work={playlistCheatWork}
+            setWork={setPlaylistCheatWork}
+            theme={derived}
+            onGoToLibrary={() => setTab(3)}
+          />
+        )}
 
-        {tab === 2 && <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} />}
+        {tab === 2 && <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} theme={derived} onGoToLibrary={() => setTab(3)} />}
 
         {tab === 3 && (
           <>
