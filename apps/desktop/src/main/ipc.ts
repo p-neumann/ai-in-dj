@@ -18,7 +18,7 @@ import {
   clearAllTracks
 } from "./db/tracks.ts";
 import { getPreference, setPreference } from "./db/preferences.ts";
-import { appendHistoryEntry, listHistory } from "./db/history.ts";
+import { appendHistoryEntry, updateHistoryEntry, listHistory } from "./db/history.ts";
 import {
   buildCsv,
   buildM3u,
@@ -158,10 +158,12 @@ export function registerPreferencesIpc(db: Database.Database): void {
 // Step 4 - history: a generic log of "this happened" entries. The real
 // Track Cheat shape gets written here once it exists (step 5).
 export function registerHistoryIpc(db: Database.Database): void {
-  ipcMain.handle("history:append", (_event, entry: unknown) => {
-    appendHistoryEntry(db, entry);
-    return true;
-  });
+  // Piece 20 (History panel, Piece A) - returns the new row's real id
+  // now, instead of just `true`, so the renderer can patch this exact
+  // entry later (a vote, a thumbs-up reseed) without needing source's
+  // own find-by-result-name heuristic.
+  ipcMain.handle("history:append", (_event, entry: unknown) => appendHistoryEntry(db, entry));
+  ipcMain.handle("history:update", (_event, id: number, patch: Record<string, unknown>) => updateHistoryEntry(db, id, patch));
   ipcMain.handle("history:list", (_event, limit: number) => listHistory(db, limit));
 }
 

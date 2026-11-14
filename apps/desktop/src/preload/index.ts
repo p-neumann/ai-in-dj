@@ -192,7 +192,9 @@ const api = {
     set: (key: string, value: string): Promise<boolean> => ipcRenderer.invoke("prefs:set", key, value)
   },
   history: {
-    append: (entry: unknown): Promise<boolean> => ipcRenderer.invoke("history:append", entry),
+    // Piece 20 - returns the new row's real id now, not just `true`.
+    append: (entry: unknown): Promise<number> => ipcRenderer.invoke("history:append", entry),
+    update: (id: number, patch: Record<string, unknown>): Promise<boolean> => ipcRenderer.invoke("history:update", id, patch),
     list: (limit: number): Promise<HistoryRow[]> => ipcRenderer.invoke("history:list", limit)
   },
   // R18 - keeps the prototype's own function names.

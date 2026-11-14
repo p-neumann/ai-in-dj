@@ -178,7 +178,8 @@ interface Window {
       set: (key: string, value: string) => Promise<boolean>;
     };
     history: {
-      append: (entry: unknown) => Promise<boolean>;
+      append: (entry: unknown) => Promise<number>;
+      update: (id: number, patch: Record<string, unknown>) => Promise<boolean>;
       list: (limit: number) => Promise<CcdjHistoryRow[]>;
     };
     showInFinder: (trackId: number) => Promise<CcdjShowInFinderResult>;

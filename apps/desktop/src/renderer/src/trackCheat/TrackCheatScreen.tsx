@@ -59,6 +59,7 @@ import { recommendTrackCheat, sendSessionEvent } from "../api/backendClient";
 import { getVibeLabel } from "./vibeLabels";
 import { buildLikeAsSeedMatches, type LikeAsSeedMatch } from "./likeAsSeed";
 import { resolveSeedTrack } from "./fuzzyFind";
+import { buildHistorySeedEntry, resolveVotePatch, type HistoryResultRow, type HistoryTrigger } from "./historyEntry";
 import type { SharedSession } from "../App";
 import type { DerivedTheme } from "../theme/deriveTheme";
 import GlobalAccentStyle from "../shared/GlobalAccentStyle";
@@ -137,6 +138,15 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
 
   const [result, setResult] = useState<ResultState>({ status: "idle" });
   const [votes, setVotes] = useState<Record<number, "up" | "down">>({});
+  // Piece 20 (History panel, Piece A) - which history row the CURRENT
+  // results came from, and the exact results array we last wrote to
+  // it, so handleVote can patch the right entry's right result
+  // precisely (by trackId) instead of needing source's own search-
+  // backward-by-name heuristic (logOutcome, source 1656-1666). Reset
+  // by simply being overwritten every time a new fetch/reseed lands -
+  // no explicit clear step needed.
+  const currentHistoryEntryIdRef = useRef<number | null>(null);
+  const currentHistoryResultsRef = useRef<HistoryResultRow[]>([]);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT_STATE);
   // docs/decisions/0017: a TESTING CONTROL, not a real setting - default
   // stays "high" (Anthropic's own default), nothing about ranking/
@@ -211,7 +221,19 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
   // what just happened, THEN ask for recommendations using the server's
   // updated session state (CLAUDE.md 4.1 - these are genuinely different
   // events, not the same action with a different label).
-  async function recommendForSeed(trackId: number, origin: "external" | "ccdjResult"): Promise<void> {
+  //
+  // Piece 20 (History panel, Piece A, 2026-11-14): `trigger` is now an
+  // explicit, honest label per call site (search/daisyChain/
+  // manualRetry/freshSeed) instead of the old two-way guess from
+  // `origin` alone - `origin` is a SEPARATE concept the server's own
+  // chain state machine needs (CLAUDE.md 4.1), `trigger` is purely a
+  // history/display label, and conflating them was losing real
+  // information (e.g. Try Again and a fresh GO both used to log as
+  // the same thing). The history entry is created BEFORE the fetch
+  // (matching his own logSeedEvent-then-logResultsForSeed order,
+  // source 1611/1632) specifically so a failed fetch still leaves a
+  // real record instead of silently logging nothing, same as his.
+  async function recommendForSeed(trackId: number, origin: "external" | "ccdjResult", trigger: HistoryTrigger): Promise<void> {
     // docs/decisions/0015: no longer creates a fallback session of its
     // own here - doing that was exactly the bug being fixed (a second,
     // divergent session Crate Cheat would never see). If the app's one
@@ -222,6 +244,14 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       return;
     }
     setResult({ status: "loading" });
+
+    const seedTrackRow = allTracks?.find((t) => t.id === trackId) ?? null;
+    const entryId = await window.ccdj.history.append(
+      buildHistorySeedEntry(seedTrackRow, `track ${trackId}`, vibe, energy, trigger)
+    );
+    currentHistoryEntryIdRef.current = entryId;
+    currentHistoryResultsRef.current = [];
+
     try {
       const seedSeq = session.clientSeq + 1;
       const eventRes = await sendSessionEvent(session.sessionId, {
@@ -231,6 +261,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
         clientSeq: seedSeq
       });
       if (!eventRes.ok) {
+        void window.ccdj.history.update(entryId, { resultStatus: "error" });
         setResult({ status: "error", message: eventRes.error ?? "Could not record the seed change" });
         return;
       }
@@ -249,6 +280,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
         debugOverride: { effort }
       });
       if (!data.ok) {
+        void window.ccdj.history.update(entryId, { resultStatus: "error" });
         setResult({ status: "error", message: data.error ?? "Unknown error" });
         return;
       }
@@ -261,19 +293,23 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       setResult({ status: "done", data });
       setSort(DEFAULT_SORT_STATE);
 
-      // Step 5, piece 7 (Settings): the first real history logging in
-      // the app - deliberately simplified (docs/QUESTIONS.md, "History
-      // panel: Phase 5 remaining work"). No per-result outcome, no
-      // chain/bridge/drift detail, no notes yet - just enough for the
-      // History panel to show and export something real.
-      const seedName = allTracks?.find((t) => t.id === trackId)?.displayName ?? `track ${trackId}`;
-      window.ccdj.history.append({
-        seedName,
-        trigger: origin === "ccdjResult" ? "daisyChain" : "freshSeed",
-        resultCount: data.results?.length ?? 0,
-        at: new Date().toISOString()
+      const resultRows: HistoryResultRow[] = (data.results ?? []).map((r) => ({
+        trackId: r.trackId,
+        name: r.name,
+        bpm: r.bpm,
+        key: r.key,
+        outcome: "shown"
+      }));
+      currentHistoryResultsRef.current = resultRows;
+      void window.ccdj.history.update(entryId, {
+        chainId: data.chain?.chainId ?? null,
+        chainDepth: data.chain?.depth ?? null,
+        mode: data.mode ?? null,
+        resultStatus: resultRows.length > 0 ? "ok" : "empty",
+        results: resultRows
       });
     } catch (error) {
+      void window.ccdj.history.update(entryId, { resultStatus: "error" });
       setResult({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
@@ -287,7 +323,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
   // the contract there is unchanged.
   async function handleGetRecommendations(): Promise<void> {
     if (seedTrackId !== null) {
-      await recommendForSeed(seedTrackId, "external");
+      await recommendForSeed(seedTrackId, "external", "search");
       return;
     }
     const query = seedSearch.trim();
@@ -298,12 +334,12 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       return;
     }
     setSeedTo(found.id);
-    await recommendForSeed(found.id, "external");
+    await recommendForSeed(found.id, "external", "search");
   }
 
   async function handleDaisyChain(trackId: number): Promise<void> {
     setSeedTo(trackId);
-    await recommendForSeed(trackId, "ccdjResult");
+    await recommendForSeed(trackId, "ccdjResult", "daisyChain");
   }
 
   // Thumbs down reaches the server's REAL exclusion bookkeeping (R12):
@@ -314,6 +350,15 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
   async function handleVote(trackId: number, value: "up" | "down"): Promise<void> {
     const session = sessionRef.current;
     if (!session) return;
+    // Piece 21 (2026-11-13) - snapshot the history target BEFORE the
+    // first await, synchronously. ResultRow's thumbs-up fires this and
+    // handleLikeAsSeed back to back; handleLikeAsSeed's own async
+    // write (local IPC) resolves faster than this function's await
+    // below (a backend HTTP round trip) and overwrites these same
+    // refs. Reading the refs only after the await would race it and
+    // patch the wrong, brand-new entry. See resolveVotePatch for why
+    // the write-back is also guarded.
+    const voteSnapshot = { entryId: currentHistoryEntryIdRef.current, results: currentHistoryResultsRef.current };
     const nextValue = votes[trackId] === value ? null : value;
     const seq = session.clientSeq + 1;
     const res = await sendSessionEvent(session.sessionId, { type: "vote", trackId, value: nextValue, clientSeq: seq });
@@ -325,6 +370,20 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       else delete next[trackId];
       return next;
     });
+    // Piece 20 (History panel, Piece A) - his logOutcome (source
+    // 2478/1656-1666), patching the outcome of the result this vote
+    // was on in whichever history entry it actually came from.
+    const patch = resolveVotePatch(
+      voteSnapshot,
+      currentHistoryEntryIdRef.current,
+      currentHistoryResultsRef.current,
+      trackId,
+      nextValue ?? "shown"
+    );
+    if (patch) {
+      if (patch.shouldWriteRef) currentHistoryResultsRef.current = patch.results;
+      void window.ccdj.history.update(patch.entryId, { results: patch.results });
+    }
   }
 
   // Piece 17 (2026-11-13) - his handleLikeAsSeed (source 2489-2546),
@@ -358,11 +417,18 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
     setResult({ status: "likedAsSeed", matches });
     setSort(DEFAULT_SORT_STATE);
     if (sessionRef.current) updateSession({ chainId: null, chainDepth: 0 });
-    window.ccdj.history.append({
-      seedName: track.displayName,
-      trigger: "likedAsSeed",
-      resultCount: matches.length,
-      at: new Date().toISOString()
+
+    // Piece 20 (History panel, Piece A) - same richer entry shape as
+    // a real fetch, minus chain/mode (there's no recommend response
+    // here to report them from - no AI call at all, confirmed in this
+    // function's own header comment).
+    const resultRows: HistoryResultRow[] = matches.map((m) => ({ trackId: m.trackId, name: m.name, bpm: m.bpm, key: m.key, outcome: "shown" }));
+    const entry = buildHistorySeedEntry(track, track.displayName, vibe, energy, "likedAsSeed");
+    entry.resultStatus = resultRows.length > 0 ? "ok" : "empty";
+    entry.results = resultRows;
+    window.ccdj.history.append(entry).then((entryId) => {
+      currentHistoryEntryIdRef.current = entryId;
+      currentHistoryResultsRef.current = resultRows;
     });
   }
 
@@ -401,7 +467,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
       return;
     }
     setSeedTo(match.id);
-    await recommendForSeed(match.id, "external");
+    await recommendForSeed(match.id, "external", "freshSeed");
   }
 
   // Source: simulateDeckDrop (3708-3722) / handleDeckSelect (3724-3731).
@@ -415,7 +481,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
     setActiveDeck(deckNum);
     if (deckWatchOn) {
       setSeedTo(randomTrack.id);
-      void recommendForSeed(randomTrack.id, "external");
+      void recommendForSeed(randomTrack.id, "external", "freshSeed");
     }
   }
   function handleDeckSelect(deckNum: 1 | 2): void {
@@ -423,7 +489,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
     const track = deckNum === 1 ? deck1 : deck2;
     if (!track || !deckWatchOn) return;
     setSeedTo(track.id);
-    void recommendForSeed(track.id, "external");
+    void recommendForSeed(track.id, "external", "freshSeed");
   }
 
   if (allTracks === null) {
@@ -655,7 +721,7 @@ export default function TrackCheatScreen({ sharedSession, gigMode, setGigMode, t
             <KeyPill keyVal={seedTrack.key} />
             {!isBusy && (
               <button
-                onClick={() => recommendForSeed(seedTrack.id, "external")}
+                onClick={() => recommendForSeed(seedTrack.id, "external", "manualRetry")}
                 style={{ fontSize: 12, padding: "4px 10px", background: "transparent", border: "2px solid " + theme.accentAlpha(0.3), borderRadius: 6, color: theme.accent, cursor: "pointer", letterSpacing: "0.04em", fontWeight: 700 }}
               >
                 Try Again

@@ -24,6 +24,7 @@ import type { SharedSession } from "../App";
 import { SWATCHES_ACCENT, SWATCHES_BG, type ThemePrefs } from "./theme";
 import { addListEntry, removeListEntry, permanentOnly, buildStoredPrefsPayload, type PrefListEntry, type PrefEntryType } from "./prefsLists";
 import { formatHistoryAsJson, formatHistoryAsCsv } from "./historyExport";
+import { summarizeHistoryEntry, filterHistoryRows } from "./historySummary";
 
 const PREFS_KEY = "settingsPrefs";
 const CONTENT_VALUES = ["Dirty", "Clean"] as const;
@@ -86,6 +87,22 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
   // History
   const [historyRows, setHistoryRows] = useState<CcdjHistoryRow[]>([]);
   const [exportedText, setExportedText] = useState("");
+  // Piece 22 (2026-11-13) - readability fix, see historySummary.ts for
+  // why the old inline-JSON list was unreadable. A filter to jump to a
+  // specific entry among many, and which rows are expanded to show
+  // their full JSON (collapsed by default - the summary line is enough
+  // to find the right one).
+  const [historyFilter, setHistoryFilter] = useState("");
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
+
+  function toggleHistoryExpanded(id: number): void {
+    setExpandedHistoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // Report a Problem
   const [reportDesc, setReportDesc] = useState("");
@@ -99,7 +116,10 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
       setDoPlayList(stored.doPlayList);
       setDoNotPlayList(stored.doNotPlayList);
     });
-    window.ccdj.history.list(50).then(setHistoryRows);
+    // Piece 22 (2026-11-13) - bumped from 50: the entry that actually
+    // matters is routinely older than the 50 most recent once a
+    // session runs long, which was part of "buried under newer ones."
+    window.ccdj.history.list(200).then(setHistoryRows);
   }, []);
 
   const themeChanged = pendingAccent !== theme.accentColor || pendingBg !== theme.bgColor;
@@ -195,7 +215,7 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
   }
 
   async function refreshHistory(): Promise<void> {
-    setHistoryRows(await window.ccdj.history.list(50));
+    setHistoryRows(await window.ccdj.history.list(200));
   }
 
   function copyToClipboard(text: string): void {
@@ -411,20 +431,78 @@ export default function SettingsScreen({ sharedSession, theme, setTheme }: Setti
       {/* History */}
       <h3>History</h3>
       <p style={{ fontSize: 11, color: "#c62828" }}>
-        Simplified first version - records only the seed name, what triggered the fetch, how many results came
-        back, and when. Not yet recorded: what happened to each result (dragged/thumbs up/down), chain/bridge/drift
-        detail, or notes. See docs/QUESTIONS.md, "History panel: Phase 5 remaining work."
+        Piece A (recording) is done - this still shows the raw entries, not the real panel (Piece B, not built
+        yet). Each entry now records the seed's bpm/key/genre/year, vibe/energy, an honest trigger, chain/mode,
+        and a real per-result outcome (shown/up/down, updates live when you vote). Not recorded: dragged/prepared
+        outcomes or rich bridge/drift phase detail - see docs/QUESTIONS.md, "History panel: Phase 5 remaining work."
       </p>
       <button onClick={refreshHistory}>Refresh</button>{" "}
       <button onClick={() => setExportedText(formatHistoryAsJson(historyRows))}>Export JSON</button>{" "}
       <button onClick={() => setExportedText(formatHistoryAsCsv(historyRows))}>Export CSV</button>
-      <ul style={{ maxHeight: 200, overflowY: "auto" }}>
-        {historyRows.map((r) => (
-          <li key={r.id} style={{ fontSize: 12 }}>
-            {new Date(r.timestamp).toLocaleString()}: {JSON.stringify(r.entry)}
-          </li>
-        ))}
-        {!historyRows.length && <li style={{ color: "#888" }}>Nothing recorded yet.</li>}
+      {/* Piece 22 (2026-11-13) - readability fix. The old list rendered
+          JSON.stringify(entry) with no indent directly inline: that
+          compact form has almost no spaces for the browser to wrap on,
+          so it laid out as one unbreakable line and got visually cut
+          off at the panel's right edge - not an actual truncation of
+          the data, but unreadable all the same. And with every row at
+          that same full length, the one entry that mattered was
+          indistinguishable from the newer ones around it. Fix: a
+          one-line summary per row (collapsed by default) plus a filter,
+          with the full entry still available by expanding that one
+          row. See historySummary.ts. */}
+      <input
+        value={historyFilter}
+        onChange={(e) => setHistoryFilter(e.target.value)}
+        placeholder="Filter by seed name or trigger..."
+        style={{ width: "100%", margin: "6px 0", boxSizing: "border-box" }}
+      />
+      <ul style={{ maxHeight: 400, overflowY: "auto", listStyle: "none", padding: 0, margin: 0, border: "1px solid #333" }}>
+        {filterHistoryRows(historyRows, historyFilter).map((r) => {
+          const summary = summarizeHistoryEntry(r.entry);
+          const isExpanded = expandedHistoryIds.has(r.id);
+          return (
+            <li key={r.id} style={{ fontSize: 12, borderBottom: "1px solid #333", padding: "4px 6px" }}>
+              <div
+                onClick={() => toggleHistoryExpanded(r.id)}
+                style={{ cursor: "pointer", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "baseline" }}
+              >
+                <span>{isExpanded ? "▾" : "▸"}</span>
+                <span style={{ color: "#888" }}>{new Date(r.timestamp).toLocaleString()}</span>
+                <span style={{ color: "#888" }}>&middot;</span>
+                <span>{summary.trigger}</span>
+                <span style={{ color: "#888" }}>&middot;</span>
+                <span style={{ fontWeight: 600 }}>{summary.seedName}</span>
+                <span style={{ color: "#888" }}>&middot;</span>
+                <span>{summary.resultStatus}</span>
+                {summary.resultCount > 0 && (
+                  <span style={{ color: "#888" }}>
+                    ({summary.resultCount} results &middot; {summary.upCount} up &middot; {summary.downCount} down)
+                  </span>
+                )}
+              </div>
+              {isExpanded && (
+                <pre
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    overflowX: "auto",
+                    fontSize: 11,
+                    background: "rgba(0,0,0,0.4)",
+                    padding: 8,
+                    borderRadius: 4,
+                    marginTop: 4
+                  }}
+                >
+                  {JSON.stringify(r.entry, null, 2)}
+                </pre>
+              )}
+            </li>
+          );
+        })}
+        {!historyRows.length && <li style={{ color: "#888", padding: "4px 6px" }}>Nothing recorded yet.</li>}
+        {historyRows.length > 0 && filterHistoryRows(historyRows, historyFilter).length === 0 && (
+          <li style={{ color: "#888", padding: "4px 6px" }}>No entries match that filter.</li>
+        )}
       </ul>
       {exportedText && (
         <div>
