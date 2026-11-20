@@ -26,6 +26,7 @@ import { useEffect, useState } from "react";
 import { buildCrate } from "../api/backendClient";
 import type { SharedSession, CrateTrack } from "../App";
 import type { DerivedTheme } from "../theme/deriveTheme";
+import type { CrateCheatWork } from "./crateCheatWork";
 import SectionRule from "../shared/SectionRule";
 import EmptyLib from "../shared/EmptyLib";
 import PlayCountToggle from "../shared/PlayCountToggle";
@@ -34,40 +35,29 @@ import { CheckboxListHeader } from "../shared/ResultRow";
 import CheckboxTrackRow from "../shared/CheckboxTrackRow";
 import ExportMenu, { type ReadyExportFormat } from "../shared/ExportMenu";
 import { normalizeSmartQuotes } from "../shared/normalizeSmartQuotes";
-import { applySort, handleSort, DEFAULT_SORT_STATE, type SortField, type SortState } from "../shared/sortResults";
+import { applySort, handleSort, type SortField } from "../shared/sortResults";
 import { cardStyle, lblStyle, inputStyle, buildBtnStyle, sizeBtnStyle, WHITE, GRAY } from "../shared/controlStyles";
 
 // CLAUDE.md's own documented menu (R4) - six sizes, not an arbitrary range.
 const CRATE_SIZES = [10, 25, 50, 100, 150, 200] as const;
 
-type ResultState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "done"; data: CcdjCrateResult }
-  | { status: "error"; message: string };
-
 interface CrateCheatScreenProps {
   sharedSession: SharedSession | null;
   crateList: CrateTrack[];
   setCrateList: (next: CrateTrack[]) => void;
+  // docs/decisions/0021: everything below except libraryCount/
+  // showExportMenu/exportBusy/exportMessage, which stay local on
+  // purpose - see crateCheatWork.ts.
+  work: CrateCheatWork;
+  updateWork: (patch: Partial<CrateCheatWork>) => void;
   theme: DerivedTheme;
   onGoToLibrary: () => void;
 }
 
-export default function CrateCheatScreen({ sharedSession, crateList, setCrateList, theme, onGoToLibrary }: CrateCheatScreenProps): React.JSX.Element {
+export default function CrateCheatScreen({ sharedSession, crateList, setCrateList, work, updateWork, theme, onGoToLibrary }: CrateCheatScreenProps): React.JSX.Element {
+  const { prompt, size, crateVibePrompt, playCountMode, result, sort, effort, selected } = work;
   const [libraryCount, setLibraryCount] = useState<number | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [size, setSize] = useState<number>(10);
-  const [crateVibePrompt, setCrateVibePrompt] = useState("");
-  const [playCountMode, setPlayCountMode] = useState("mix");
-  const [result, setResult] = useState<ResultState>({ status: "idle" });
-  const [sort, setSort] = useState<SortState>(DEFAULT_SORT_STATE);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  // docs/decisions/0017: a TESTING CONTROL, not a real setting - default
-  // stays "high" (Anthropic's own default), nothing about ranking,
-  // prompts, or pool selection changes.
-  const [effort, setEffort] = useState<"high" | "low">("high");
-  const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [exportBusy, setExportBusy] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
@@ -77,12 +67,6 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
     window.ccdj.library.getStatus().then((status) => setLibraryCount(status.count));
   }, []);
 
-  useEffect(() => {
-    const all: Record<number, boolean> = {};
-    crateList.forEach((_, i) => (all[i] = true));
-    setSelected(all);
-  }, [crateList]);
-
   const isBusy = result.status === "loading";
   const selectedCount = Object.values(selected).filter(Boolean).length;
   const sortedCrate = applySort(
@@ -91,13 +75,13 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
   );
 
   function onSort(field: SortField): void {
-    setSort((prev) => handleSort(prev, field));
+    updateWork({ sort: handleSort(sort, field) });
   }
 
   function handleSelectAll(): void {
     const all: Record<number, boolean> = {};
     crateList.forEach((_, i) => (all[i] = true));
-    setSelected(all);
+    updateWork({ selected: all });
   }
 
   function selectedTracks(): CrateTrack[] {
@@ -148,10 +132,10 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
   async function handleBuildCrate(): Promise<void> {
     if (!prompt.trim()) return;
     if (!sharedSession) {
-      setResult({ status: "error", message: "Still connecting to the backend session - try again in a moment." });
+      updateWork({ result: { status: "error", message: "Still connecting to the backend session - try again in a moment." } });
       return;
     }
-    setResult({ status: "loading" });
+    updateWork({ result: { status: "loading" } });
     try {
       const data = await buildCrate({
         prompt: prompt.trim(),
@@ -162,13 +146,21 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
         debugOverride: { effort }
       });
       if (!data.ok) {
-        setResult({ status: "error", message: data.error ?? "Unknown error" });
+        updateWork({ result: { status: "error", message: data.error ?? "Unknown error" } });
         return;
       }
-      setResult({ status: "done", data });
-      setCrateList((data.results ?? []).map((r) => ({ trackId: r.trackId, name: r.name, bpm: r.bpm, key: r.key })));
+      const nextCrate = (data.results ?? []).map((r) => ({ trackId: r.trackId, name: r.name, bpm: r.bpm, key: r.key }));
+      // docs/decisions/0021: a build REPLACES the crate (same as his own
+      // setPlaylist(deduped)), so it replaces the selection too - every
+      // freshly built track starts selected, same as the old mount-keyed
+      // effect used to produce, just triggered by the actual build now
+      // instead of by every remount.
+      const nextSelected: Record<number, boolean> = {};
+      nextCrate.forEach((_, i) => { nextSelected[i] = true; });
+      updateWork({ result: { status: "done", data }, selected: nextSelected });
+      setCrateList(nextCrate);
     } catch (error) {
-      setResult({ status: "error", message: error instanceof Error ? error.message : String(error) });
+      updateWork({ result: { status: "error", message: error instanceof Error ? error.message : String(error) } });
     }
   }
 
@@ -187,7 +179,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
       <p style={{ fontSize: 11, color: "#a15c00", marginBottom: "0.5rem" }}>
         <b>TESTING CONTROL</b> - effort (default stays high; this does not change ranking, prompts, or pool
         selection):{" "}
-        <select value={effort} onChange={(e) => setEffort(e.target.value as "high" | "low")}>
+        <select value={effort} onChange={(e) => updateWork({ effort: e.target.value as "high" | "low" })}>
           <option value="high">high (default)</option>
           <option value="low">low</option>
         </select>
@@ -200,7 +192,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
         <div style={{ position: "relative" }}>
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(normalizeSmartQuotes(e.target.value))}
+            onChange={(e) => updateWork({ prompt: normalizeSmartQuotes(e.target.value) })}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -224,7 +216,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
         </label>
         <input
           value={crateVibePrompt}
-          onChange={(e) => setCrateVibePrompt(normalizeSmartQuotes(e.target.value))}
+          onChange={(e) => updateWork({ crateVibePrompt: normalizeSmartQuotes(e.target.value) })}
           placeholder="e.g. give me redrums, hype intros only, more energy..."
           style={inputStyle(theme)}
         />
@@ -232,7 +224,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, color: GRAY, textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.12em" }}>Tracks</span>
           {CRATE_SIZES.map((n) => (
-            <button key={n} onClick={() => setSize(n)} style={sizeBtnStyle(theme, size === n)}>
+            <button key={n} onClick={() => updateWork({ size: n })} style={sizeBtnStyle(theme, size === n)}>
               {n}
             </button>
           ))}
@@ -244,7 +236,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
             underlying feature is real and independent of Track Cheat's
             own setting. */}
         <div style={{ marginTop: 12 }}>
-          <PlayCountToggle mode={playCountMode} setMode={setPlayCountMode} accent={theme.accent} ia={theme.ia} />
+          <PlayCountToggle mode={playCountMode} setMode={(next) => updateWork({ playCountMode: next })} accent={theme.accent} ia={theme.ia} />
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
@@ -306,7 +298,7 @@ export default function CrateCheatScreen({ sharedSession, crateList, setCrateLis
                 isSelected={!!selected[t.origIdx]}
                 theme={theme}
                 rowBg={i % 2 === 0 ? theme.rowEven : theme.rowOdd}
-                onToggle={() => setSelected((prev) => ({ ...prev, [t.origIdx]: !prev[t.origIdx] }))}
+                onToggle={() => updateWork({ selected: { ...selected, [t.origIdx]: !selected[t.origIdx] } })}
                 dimOpacity={0.35}
               />
             ))}

@@ -117,6 +117,11 @@ export interface SessionEventResult {
   duplicate?: boolean;
   errorCode?: string;
   error?: string;
+  // docs/decisions/0020: the server's own position at the moment it
+  // rejected this event as stale - lets the client say exactly what's
+  // out of sync instead of just the bare STALE_EVENT code.
+  serverLastClientSeq?: number;
+  serverStateVersion?: number;
 }
 
 export async function sendSessionEvent(
@@ -132,10 +137,16 @@ export async function sendSessionEvent(
     const body = (await res.json()) as {
       ok: boolean;
       data?: { accepted: boolean; stateVersion: number; duplicate: boolean };
-      error?: { code?: string; message?: string };
+      error?: { code?: string; message?: string; serverLastClientSeq?: number; serverStateVersion?: number };
     };
     if (!res.ok || !body.ok) {
-      return { ok: false, errorCode: body.error?.code, error: body.error?.message || `HTTP ${res.status}` };
+      return {
+        ok: false,
+        errorCode: body.error?.code,
+        error: body.error?.message || `HTTP ${res.status}`,
+        serverLastClientSeq: body.error?.serverLastClientSeq,
+        serverStateVersion: body.error?.serverStateVersion
+      };
     }
     return { ok: true, ...body.data };
   } catch (error) {

@@ -221,6 +221,24 @@ test("sendSessionEvent: a STALE_EVENT response carries its error code through, n
   assert.equal(result.errorCode, "STALE_EVENT");
 });
 
+// docs/decisions/0020: the server's own position (serverLastClientSeq/
+// serverStateVersion) must survive the round trip through this layer too,
+// not just the bare code - otherwise the richer body the server now
+// sends never actually reaches anywhere it could be shown.
+test("sendSessionEvent: a STALE_EVENT response's server-position fields pass through, not just the code", async () => {
+  const { sendSessionEvent } = require("../src/main/backendClient.ts");
+
+  const result = await withStubbedFetch(
+    [{ ok: false, status: 409, json: { ok: false, error: { code: "STALE_EVENT", serverLastClientSeq: 7, serverStateVersion: 3 } } }],
+    () => sendSessionEvent("s_1", { type: "vote", trackId: 1, value: "up", clientSeq: 1 })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "STALE_EVENT");
+  assert.equal(result.serverLastClientSeq, 7);
+  assert.equal(result.serverStateVersion, 3);
+});
+
 test("sendSessionEvent: a network error is caught and reported, never thrown", async () => {
   const { sendSessionEvent } = require("../src/main/backendClient.ts");
 

@@ -106,6 +106,12 @@ interface CcdjSessionEventResult {
   stateVersion?: number;
   duplicate?: boolean;
   error?: string;
+  // docs/decisions/0020: a STALE_EVENT now tells the client exactly
+  // where the server actually is, instead of just a bare code - lets
+  // the UI say what's out of sync instead of just "Error: HTTP 409".
+  errorCode?: string;
+  serverLastClientSeq?: number;
+  serverStateVersion?: number;
 }
 
 interface CcdjCrateResult {

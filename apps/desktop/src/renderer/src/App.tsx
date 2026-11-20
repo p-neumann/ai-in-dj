@@ -12,11 +12,15 @@
 // Mode now only has to do what the source actually does: hide the tab
 // bar (AppHeader's own job, matching gigMode&&tab===0 exactly).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { checkBackendHealth, createBackendSession } from "./api/backendClient";
+import { initialSessionState } from "./trackCheat/sessionLifecycle";
+import { createInitialTrackCheatWork, type TrackCheatWork } from "./trackCheat/trackCheatWork";
+import type { HistoryResultRow } from "./trackCheat/historyEntry";
 import LibraryScreen from "./library/LibraryScreen";
 import TrackCheatScreen from "./trackCheat/TrackCheatScreen";
 import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
+import { createInitialCrateCheatWork, type CrateCheatWork } from "./crateCheat/crateCheatWork";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
 import type { MatchedResult } from "./playlistCheat/matchPlaylist.ts";
 import SettingsScreen from "./settings/SettingsScreen";
@@ -32,10 +36,20 @@ import { deriveTheme } from "./theme/deriveTheme";
 // Play/staleness checks. That was never Mike's design; it was a side
 // effect of building each screen separately. Plumbing only - no
 // recommendation logic changes here.
+//
+// docs/decisions/0020: clientSeq/chainDepth were previously owned by
+// TrackCheatScreen's own local ref, re-seeded every time that screen
+// mounted (including a remount after a tab switch) - the root cause of
+// a permanent HTTP 409 after switching tabs and back. They live here now
+// for the same reason sessionId/chainId/stateVersion already did: this
+// component never unmounts, so this state genuinely survives a tab
+// switch. See trackCheat/sessionLifecycle.ts.
 export interface SharedSession {
   sessionId: string;
   chainId: string | null;
   stateVersion: number;
+  clientSeq: number;
+  chainDepth: number;
 }
 
 // docs/decisions/0019: Mike's Crate Cheat tab is a persisting, editable
@@ -135,6 +149,28 @@ export default function App(): React.JSX.Element {
     results: [],
     selected: {}
   });
+  // docs/decisions/0021: everything Track Cheat's screen itself showed
+  // was local useState, so it vanished on every tab-away-and-back the
+  // same way Playlist Cheat's results used to (docs/decisions/0019) -
+  // lifted here for the same reason, and by the same pattern.
+  const [trackCheatWork, setTrackCheatWork] = useState<TrackCheatWork>(createInitialTrackCheatWork());
+  // docs/decisions/0021: the part of Crate Cheat's own screen state that
+  // was still local (result/selected/prompt/size/crateVibePrompt/sort/
+  // effort) - crateList itself was already lifted (0019), but a DJ who
+  // deselected specific tracks before switching tabs got them silently
+  // RESELECTED on return (the recompute-on-mount effect re-ran against
+  // the persisted crateList). Transient UI feedback (showExportMenu/
+  // exportBusy/exportMessage) stays local on purpose - see 0021.
+  const [crateCheatWork, setCrateCheatWork] = useState<CrateCheatWork>(createInitialCrateCheatWork());
+  // docs/decisions/0021: which history DB row Track Cheat's CURRENT
+  // results came from, and the exact results array last written to it.
+  // Stays a REF, not state - piece 21's thumbs-up race fix (historyEntry.ts)
+  // depends on reading the truly-live value after an await, which only a
+  // ref gives; converting this to state/props would reintroduce that
+  // exact race (a closure only ever sees what was current when it was
+  // created). Created here instead of inside TrackCheatScreen so the ref
+  // OBJECT ITSELF survives a remount, same effect as lifting a value.
+  const trackCheatHistoryRef = useRef<{ entryId: number | null; results: HistoryResultRow[] }>({ entryId: null, results: [] });
 
   useEffect(() => {
     window.ccdj.getAppVersion().then(setAppVersion);
@@ -146,14 +182,40 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     createBackendSession().then((created) => {
       if (created.ok && created.sessionId) {
-        setSharedSession({
-          sessionId: created.sessionId,
-          chainId: created.chainId ?? null,
-          stateVersion: created.stateVersion ?? 0
-        });
+        // docs/decisions/0020: the ONLY place this state is ever seeded
+        // from scratch - once, right here, for the lifetime of this
+        // real backend session. TrackCheatScreen no longer does this
+        // itself on mount.
+        setSharedSession(
+          initialSessionState({
+            sessionId: created.sessionId,
+            chainId: created.chainId ?? null,
+            stateVersion: created.stateVersion ?? 0
+          })
+        );
       }
     });
   }, []);
+
+  // docs/decisions/0020: the one place anything merges a patch into the
+  // shared session - TrackCheatScreen no longer keeps its own copy to
+  // mutate, so this is now the only writer, matching the setCrateList
+  // pattern already used for the crate list.
+  function updateSharedSession(patch: Partial<SharedSession>): void {
+    setSharedSession((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  // docs/decisions/0021: same merge-a-patch pattern as updateSharedSession.
+  // Accepts a function too (not just a plain patch) for the one case that
+  // needs it (handleVote's votes update, replacing its old setVotes(prev
+  // => ...) functional form) - everywhere else a plain object is simpler.
+  function updateTrackCheatWork(patch: Partial<TrackCheatWork> | ((prev: TrackCheatWork) => Partial<TrackCheatWork>)): void {
+    setTrackCheatWork((prev) => ({ ...prev, ...(typeof patch === "function" ? patch(prev) : patch) }));
+  }
+
+  function updateCrateCheatWork(patch: Partial<CrateCheatWork> | ((prev: CrateCheatWork) => Partial<CrateCheatWork>)): void {
+    setCrateCheatWork((prev) => ({ ...prev, ...(typeof patch === "function" ? patch(prev) : patch) }));
+  }
 
   async function handleToggleAlwaysOnTop(): Promise<void> {
     const confirmed = await window.ccdj.setAlwaysOnTop(!alwaysOnTop);
@@ -175,7 +237,19 @@ export default function App(): React.JSX.Element {
       />
 
       <main style={{ padding: "1.5rem", maxWidth: 720, margin: "0 auto" }}>
-        {tab === 0 && <TrackCheatScreen sharedSession={sharedSession} gigMode={gigMode} setGigMode={setGigMode} theme={derived} onGoToLibrary={() => setTab(3)} />}
+        {tab === 0 && (
+          <TrackCheatScreen
+            sharedSession={sharedSession}
+            updateSession={updateSharedSession}
+            work={trackCheatWork}
+            updateWork={updateTrackCheatWork}
+            historyRef={trackCheatHistoryRef}
+            gigMode={gigMode}
+            setGigMode={setGigMode}
+            theme={derived}
+            onGoToLibrary={() => setTab(3)}
+          />
+        )}
 
         {tab === 1 && (
           <PlaylistCheatScreen
@@ -184,7 +258,20 @@ export default function App(): React.JSX.Element {
             // landed, rather than leaving them on Playlist Cheat wondering
             // if the click did anything. Stage 2b fix (2026-11-12).
             onAddToCrate={(tracks) => {
+              // docs/decisions/0021: appending must also mark the newly
+              // added tracks selected, same as a fresh build does - the
+              // old mount-keyed effect inside CrateCheatScreen used to
+              // do this for free (it fired on every crateList change,
+              // mount or not); replaced with explicit updates at each
+              // real mutation site now that selection persists.
+              const startIndex = crateList.length;
               setCrateList((prev) => [...prev, ...tracks]);
+              updateCrateCheatWork({
+                selected: tracks.reduce(
+                  (acc, _, i) => ({ ...acc, [startIndex + i]: true }),
+                  { ...crateCheatWork.selected }
+                )
+              });
               setTab(2);
             }}
             work={playlistCheatWork}
@@ -194,9 +281,30 @@ export default function App(): React.JSX.Element {
           />
         )}
 
-        {tab === 2 && <CrateCheatScreen sharedSession={sharedSession} crateList={crateList} setCrateList={setCrateList} theme={derived} onGoToLibrary={() => setTab(3)} />}
+        {tab === 2 && (
+          <CrateCheatScreen
+            sharedSession={sharedSession}
+            crateList={crateList}
+            setCrateList={setCrateList}
+            work={crateCheatWork}
+            updateWork={updateCrateCheatWork}
+            theme={derived}
+            onGoToLibrary={() => setTab(3)}
+          />
+        )}
 
-        {tab === 3 && <LibraryScreen theme={derived} onClearLibrary={() => setCrateList([])} />}
+        {tab === 3 && (
+          <LibraryScreen
+            theme={derived}
+            onClearLibrary={() => {
+              setCrateList([]);
+              // docs/decisions/0021: selected is keyed by crate index -
+              // leaving it as-is after a clear would make selectedCount
+              // show stale true-entries for tracks that no longer exist.
+              updateCrateCheatWork({ selected: {} });
+            }}
+          />
+        )}
 
         {tab === 4 && <AccountTab theme={derived} lightMode={theme.lightMode} appVersion={appVersion} />}
 

@@ -13,7 +13,14 @@
 // won't produce the "likedAsSeed" trigger label specifically.
 
 export class StaleEventError extends Error {
-  constructor() { super("clientSeq is not newer than the session's last accepted event"); }
+  // docs/decisions/0020: carries the session's real position at the
+  // moment of rejection, so the route can tell the client exactly what
+  // was out of sync instead of just the bare STALE_EVENT code.
+  constructor(serverLastClientSeq, serverStateVersion) {
+    super("clientSeq is not newer than the session's last accepted event");
+    this.serverLastClientSeq = serverLastClientSeq;
+    this.serverStateVersion = serverStateVersion;
+  }
 }
 
 function isNewerOrDuplicate(session, clientSeq, idempotencyKey) {
@@ -149,6 +156,16 @@ function handleTryAgain(session) {
   if (session.manualRetryCount > 1) {
     session.daisyChainDepth = 0;
   }
+  // Source's own Try Again (L5697/5806) unconditionally passes null for
+  // bridgeContextArg/driftContextArg regardless of whatever bridgeContext/
+  // styleDriftContext component state currently holds - a retry is a
+  // clean re-ask of the base chain-feel, never bridge/drift-tagged.
+  // Without this, a Try Again clicked right after an external swerve (which
+  // sets bridgeContext but resets daisyChainDepth to 0, so manualRetryCount
+  // alone can't tell the two apart) would keep building a bridge-mode
+  // prompt on the retry - something source never does.
+  session.bridgeContext = null;
+  session.driftContext = null;
   return { accepted: true };
 }
 
@@ -176,7 +193,7 @@ const HANDLERS = {
 export function applyEvent(session, event) {
   const { type, clientSeq, idempotencyKey } = event;
   const ordering = isNewerOrDuplicate(session, clientSeq, idempotencyKey);
-  if (ordering.kind === "stale") throw new StaleEventError();
+  if (ordering.kind === "stale") throw new StaleEventError(session.lastClientSeq, session.stateVersion);
   if (ordering.kind === "duplicate") return { ...ordering.stored, duplicate: true };
 
   const handler = HANDLERS[type];

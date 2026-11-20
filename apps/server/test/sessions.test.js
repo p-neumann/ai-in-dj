@@ -42,9 +42,16 @@ test("event ordering: a clientSeq that is not newer than the last accepted one i
   const staleEqual = await sendEvent(app, session.sessionId, { type: "sliderChanged", vibe: 3, energy: 0, clientSeq: 5 });
   assert.equal(staleEqual.statusCode, 409);
   assert.equal(staleEqual.json().error.code, "STALE_EVENT");
+  // docs/decisions/0020: the body must carry the server's real position,
+  // not just the bare code - this is what lets a client (or a human)
+  // tell what's actually out of sync instead of guessing from a 409
+  // with nothing in it.
+  assert.equal(staleEqual.json().error.serverLastClientSeq, 5, "the server's real lastClientSeq, not the rejected request's");
+  assert.equal(staleEqual.json().error.serverStateVersion, 1);
 
   const staleLower = await sendEvent(app, session.sessionId, { type: "sliderChanged", vibe: 3, energy: 0, clientSeq: 4 });
   assert.equal(staleLower.statusCode, 409);
+  assert.equal(staleLower.json().error.serverLastClientSeq, 5, "unchanged by the rejected attempt");
 
   // State must be unchanged by either rejected attempt.
   const after = await sendEventOk(app, session.sessionId, { type: "sliderChanged", vibe: 9, energy: 0, clientSeq: 6 });
@@ -306,4 +313,80 @@ test("shown-exclusion caps at the most recently shown 20, matching the prototype
 
   const raw = getSession(session.sessionId);
   assert.ok(raw.shownTrackIds.size >= 30, "the underlying shown set itself keeps growing unbounded, same as the source's bangerExcluded state - only what's ENFORCED per request is capped");
+});
+
+// R11 / CLAUDE.md 4.5 - manual-retry chain-break counter (piece 23,
+// 2026-11-14). Via real events through the HTTP route, same as every
+// other test in this file - not calling applyEvent directly.
+test("tryAgain: the 1st consecutive retry preserves the chain, the 2nd (no pick in between) breaks it", async () => {
+  const app = makeApp();
+  const session = await createSession(app);
+  let seq = 1;
+
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t1", origin: "external", clientSeq: seq++ });
+  const fresh = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t1", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(fresh.chain.depth, 0);
+
+  // Daisy-chain reseed: origin "ccdjResult" alone makes this an internal
+  // reseed regardless of lastBatch contents (sessionEvents.js's own
+  // isInternalReseed check) - depth goes 0 -> 1.
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t2", origin: "ccdjResult", clientSeq: seq++ });
+  const chained = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t2", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(chained.chain.depth, 1, "chain should now be active");
+
+  // 1st Try Again: must NOT break the chain.
+  await sendEventOk(app, session.sessionId, { type: "tryAgain", clientSeq: seq++ });
+  const afterFirstRetry = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t2", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(afterFirstRetry.chain.depth, 1, "R11: the 1st consecutive retry keeps the chain");
+  assert.equal(afterFirstRetry.trigger, "manualRetry");
+
+  // 2nd Try Again in a row, no pick in between: must break the chain.
+  await sendEventOk(app, session.sessionId, { type: "tryAgain", clientSeq: seq++ });
+  const afterSecondRetry = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t2", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(afterSecondRetry.chain.depth, 0, "R11: the 2nd consecutive retry (no pick in between) breaks the chain");
+  assert.equal(afterSecondRetry.trigger, "manualRetry");
+});
+
+test("tryAgain: an up-vote in between resets the counter, so the next retry is treated as a 1st again", async () => {
+  const app = makeApp();
+  const session = await createSession(app);
+  let seq = 1;
+
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t1", origin: "external", clientSeq: seq++ });
+  await recommendOk(app, { library: sampleLibrary, seedTrackId: "t1", sessionId: session.sessionId, clientSeq: seq++ });
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t2", origin: "ccdjResult", clientSeq: seq++ });
+  const chained = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t2", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(chained.chain.depth, 1);
+
+  await sendEventOk(app, session.sessionId, { type: "tryAgain", clientSeq: seq++ }); // retry #1
+  // A thumbs-up resets manualRetryCount (handleVote, sessionEvents.js) -
+  // matches source's own reset-on-pick behavior (CLAUDE.md 4.5).
+  await sendEventOk(app, session.sessionId, { type: "vote", trackId: "t5", value: "up", clientSeq: seq++ });
+
+  await sendEventOk(app, session.sessionId, { type: "tryAgain", clientSeq: seq++ }); // would be retry #2 WITHOUT the reset above
+  const afterRetry = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t2", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(afterRetry.chain.depth, 1, "the up-vote reset the counter, so this retry is only the 1st since - chain must survive");
+});
+
+test("tryAgain clears any bridge context, matching source's unconditional null-passing on retry (source L5697/5806)", async () => {
+  const app = makeApp();
+  const session = await createSession(app);
+  let seq = 1;
+
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t1", origin: "external", clientSeq: seq++ });
+  await recommendOk(app, { library: sampleLibrary, seedTrackId: "t1", sessionId: session.sessionId, clientSeq: seq++ });
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t2", origin: "ccdjResult", clientSeq: seq++ });
+  await recommendOk(app, { library: sampleLibrary, seedTrackId: "t2", sessionId: session.sessionId, clientSeq: seq++ });
+
+  // External swerve while chained: sets bridgeContext, resets depth to 0.
+  await sendEventOk(app, session.sessionId, { type: "seedDropped", trackId: "t3", origin: "external", clientSeq: seq++ });
+  const bridged = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t3", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(bridged.mode, "bridge", "the swerve must produce a bridge-mode batch");
+
+  // Try Again on this bridge-tagged batch, with no pick in between: must
+  // NOT keep building a bridge-mode prompt - source never carries bridge/
+  // drift context into a retry.
+  await sendEventOk(app, session.sessionId, { type: "tryAgain", clientSeq: seq++ });
+  const afterRetry = await recommendOk(app, { library: sampleLibrary, seedTrackId: "t3", sessionId: session.sessionId, clientSeq: seq++ });
+  assert.equal(afterRetry.mode, "none", "a retry must not still be tagged bridge - that would be a NEW divergence from source, not a port of it");
 });

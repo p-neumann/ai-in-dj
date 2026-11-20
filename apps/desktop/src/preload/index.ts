@@ -117,6 +117,10 @@ export interface SessionEventResult {
   stateVersion?: number;
   duplicate?: boolean;
   error?: string;
+  // docs/decisions/0020
+  errorCode?: string;
+  serverLastClientSeq?: number;
+  serverStateVersion?: number;
 }
 
 // Step 5, piece 5 (Crate Cheat).

@@ -30,7 +30,15 @@ export function registerSessionRoutes(app) {
     } catch (err) {
       if (err instanceof StaleEventError) {
         reply.code(409);
-        return { ok: false, error: { code: "STALE_EVENT" } };
+        // docs/decisions/0020: the client's own position at rejection
+        // time is already in the request body it just sent (clientSeq)
+        // - echoing the SERVER's position too is what actually lets a
+        // client (or a human reading a network tab) tell what's out of
+        // sync, instead of just a bare code.
+        return {
+          ok: false,
+          error: { code: "STALE_EVENT", serverLastClientSeq: err.serverLastClientSeq, serverStateVersion: err.serverStateVersion }
+        };
       }
       reply.code(400);
       return { ok: false, error: { code: "VALIDATION", message: String(err.message || err) } };
