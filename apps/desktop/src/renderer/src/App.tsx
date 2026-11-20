@@ -26,10 +26,17 @@ import type { MatchedResult } from "./playlistCheat/matchPlaylist.ts";
 import SettingsPopup from "./settings/SettingsPopup";
 import StyleProfilePopup from "./settings/StyleProfilePopup";
 import HistoryPopup from "./settings/HistoryPopup";
+import StartupPrefsReminder from "./settings/StartupPrefsReminder";
+import { parseStoredPrefs, buildStoredPrefsPayload, type PrefListEntry } from "./settings/prefsLists";
 import AppHeader from "./header/AppHeader";
 import AccountTab from "./account/AccountTab";
 import { useSavedTheme } from "./theme/useSavedTheme";
 import { deriveTheme } from "./theme/deriveTheme";
+
+// Same key StyleProfilePopup.tsx uses - the two files read/write this
+// independently (see the startupPrefs comment below for why), but must
+// agree on the key itself.
+const PREFS_KEY = "settingsPrefs";
 
 // docs/decisions/0015: ONE session, created once here, shared by every
 // screen that talks to the backend - Track Cheat, Crate Cheat, and later
@@ -191,9 +198,68 @@ export default function App(): React.JSX.Element {
   // OBJECT ITSELF survives a remount, same effect as lifting a value.
   const trackCheatHistoryRef = useRef<{ entryId: number | null; results: HistoryResultRow[] }>({ entryId: null, results: [] });
 
+  // Piece 4 (startup preferences reminder). App.tsx's OWN load of the
+  // same stored-prefs blob StyleProfilePopup independently loads when
+  // opened - this is a deliberate, separate read, not a lift of
+  // StyleProfilePopup's state, same cross-boundary judgment call
+  // already used elsewhere in this port (typeLock.ts etc.). This copy
+  // is a one-time snapshot used only to decide/render this one popup;
+  // it's never read again afterward, so it never needs to stay in
+  // sync with whatever StyleProfilePopup does once it's opened.
+  const [startupPrefs, setStartupPrefs] = useState<{ styleProfile: string; doPlayList: PrefListEntry[]; doNotPlayList: PrefListEntry[]; dontAskPrefsReminder: boolean }>({
+    styleProfile: "",
+    doPlayList: [],
+    doNotPlayList: [],
+    dontAskPrefsReminder: false
+  });
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [showPrefsReminder, setShowPrefsReminder] = useState(false);
+  // Source's prefsReminderShownRef (1295) - once per real app launch,
+  // not once per render/tab-visit. A plain useRef here gives exactly
+  // that guarantee for the same reason sharedSession/trackCheatWork do
+  // (docs/decisions/0020/0021): App.tsx itself never unmounts during
+  // the app's lifetime, only the screens underneath it do.
+  const prefsReminderShownRef = useRef(false);
+
   useEffect(() => {
     window.ccdj.getAppVersion().then(setAppVersion);
   }, []);
+
+  // Source lines 1486-1507 (the load effect) + 1513-1517 (the gated
+  // show effect), split the same way here: load once, then a separate
+  // effect decides whether to show, gated on prefsLoaded/the ref/
+  // dontAskPrefsReminder exactly like his.
+  useEffect(() => {
+    window.ccdj.prefs.get(PREFS_KEY).then((raw) => {
+      setStartupPrefs(parseStoredPrefs(raw));
+      setPrefsLoaded(true);
+    });
+  }, []);
+  useEffect(() => {
+    if (!prefsLoaded || prefsReminderShownRef.current || startupPrefs.dontAskPrefsReminder) return;
+    const hasPermanentPrefs =
+      startupPrefs.doPlayList.some((e) => e.persistent) ||
+      startupPrefs.doNotPlayList.some((e) => e.persistent) ||
+      !!(startupPrefs.styleProfile && startupPrefs.styleProfile.trim());
+    if (hasPermanentPrefs) {
+      setShowPrefsReminder(true);
+      prefsReminderShownRef.current = true;
+    }
+  }, [prefsLoaded, startupPrefs]);
+
+  // Source's checkbox onChange (5545) - persists immediately, every
+  // toggle, not just once on close. Writes all four fields together
+  // (buildStoredPrefsPayload), matching persistPrefs exactly, so this
+  // never silently drops whatever Style Profile/Do Play/Do Not Play
+  // already held.
+  function handleToggleDontAskPrefsReminder(checked: boolean): void {
+    setStartupPrefs((prev) => {
+      const next = { ...prev, dontAskPrefsReminder: checked };
+      const payload = buildStoredPrefsPayload(next.styleProfile, next.doPlayList, next.doNotPlayList, checked);
+      window.ccdj.prefs.set(PREFS_KEY, JSON.stringify(payload));
+      return next;
+    });
+  }
 
   // One session for the whole app, created once (docs/decisions/0015).
   // Every screen that needs the server gets this same one as a prop,
@@ -378,6 +444,18 @@ export default function App(): React.JSX.Element {
         <StyleProfilePopup sharedSession={sharedSession} theme={derived} onClose={() => setShowStyleProfilePopup(false)} />
       )}
       {showHistoryPopup && <HistoryPopup theme={derived} onClose={() => setShowHistoryPopup(false)} />}
+
+      {showPrefsReminder && (
+        <StartupPrefsReminder
+          theme={derived}
+          styleProfile={startupPrefs.styleProfile}
+          doPlayList={startupPrefs.doPlayList}
+          doNotPlayList={startupPrefs.doNotPlayList}
+          dontAskChecked={startupPrefs.dontAskPrefsReminder}
+          onToggleDontAsk={handleToggleDontAskPrefsReminder}
+          onDismiss={() => setShowPrefsReminder(false)}
+        />
+      )}
     </div>
   );
 }

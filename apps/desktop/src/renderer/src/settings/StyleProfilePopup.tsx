@@ -26,7 +26,7 @@ import { useEffect, useState } from "react";
 import { savePreferences } from "../api/backendClient";
 import type { SharedSession } from "../App";
 import type { DerivedTheme } from "../theme/deriveTheme";
-import { addListEntry, removeListEntry, permanentOnly, buildStoredPrefsPayload, type PrefListEntry, type PrefEntryType } from "./prefsLists";
+import { addListEntry, removeListEntry, permanentOnly, buildStoredPrefsPayload, parseStoredPrefs, type PrefListEntry, type PrefEntryType } from "./prefsLists";
 import PopupOverlay from "../shared/PopupOverlay";
 import { sectionLblStyle, WHITE, GRAY } from "../shared/controlStyles";
 
@@ -39,30 +39,17 @@ interface StyleProfilePopupProps {
   onClose: () => void;
 }
 
-interface StoredPrefs {
-  styleProfile: string;
-  doPlayList: PrefListEntry[];
-  doNotPlayList: PrefListEntry[];
-}
-
-function parseStoredPrefs(raw: string | null): StoredPrefs {
-  if (!raw) return { styleProfile: "", doPlayList: [], doNotPlayList: [] };
-  try {
-    const parsed = JSON.parse(raw);
-    return {
-      styleProfile: typeof parsed.styleProfile === "string" ? parsed.styleProfile : "",
-      doPlayList: Array.isArray(parsed.doPlayList) ? parsed.doPlayList : [],
-      doNotPlayList: Array.isArray(parsed.doNotPlayList) ? parsed.doNotPlayList : []
-    };
-  } catch {
-    return { styleProfile: "", doPlayList: [], doNotPlayList: [] };
-  }
-}
-
 export default function StyleProfilePopup({ sharedSession, theme, onClose }: StyleProfilePopupProps): React.JSX.Element {
   const [styleProfile, setStyleProfile] = useState("");
   const [doPlayList, setDoPlayList] = useState<PrefListEntry[]>([]);
   const [doNotPlayList, setDoNotPlayList] = useState<PrefListEntry[]>([]);
+  // Piece 4 (startup preferences reminder) - this screen has no UI of
+  // its own for this flag, but has to round-trip it unchanged on every
+  // save (buildStoredPrefsPayload always writes all four fields
+  // together, matching source's own persistPrefs) - otherwise editing
+  // Style Profile here would silently reset "don't ask again" back to
+  // false the next time this screen saves anything.
+  const [dontAskPrefsReminder, setDontAskPrefsReminder] = useState(false);
   const [newListTarget, setNewListTarget] = useState<"doPlay" | "doNotPlay">("doPlay");
   const [newListType, setNewListType] = useState<PrefEntryType>("artist");
   const [newListValue, setNewListValue] = useState("");
@@ -75,11 +62,12 @@ export default function StyleProfilePopup({ sharedSession, theme, onClose }: Sty
       setStyleProfile(stored.styleProfile);
       setDoPlayList(stored.doPlayList);
       setDoNotPlayList(stored.doNotPlayList);
+      setDontAskPrefsReminder(stored.dontAskPrefsReminder);
     });
   }, []);
 
   function persistLocal(nextStyle: string, nextDoPlay: PrefListEntry[], nextDoNotPlay: PrefListEntry[]): void {
-    const payload = buildStoredPrefsPayload(nextStyle, nextDoPlay, nextDoNotPlay);
+    const payload = buildStoredPrefsPayload(nextStyle, nextDoPlay, nextDoNotPlay, dontAskPrefsReminder);
     window.ccdj.prefs.set(PREFS_KEY, JSON.stringify(payload));
   }
 
