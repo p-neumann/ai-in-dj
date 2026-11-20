@@ -12,7 +12,7 @@
 // This summarizes each row into a single readable line (seed, trigger,
 // resultStatus, outcome tally) so the list can be scanned quickly; the
 // full entry is still available by expanding that one row (ccdj's own
-// SettingsScreen.tsx renders the expand/collapse). Written defensively
+// HistoryPopup.tsx renders the expand/collapse). Written defensively
 // against `entry: unknown` (CcdjHistoryRow's own ambient type, and
 // history.ts's own comment that this table stores whatever JSON-
 // serializable value it's given) - a row that isn't the Track Cheat

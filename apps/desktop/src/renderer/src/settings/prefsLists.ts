@@ -37,7 +37,7 @@ export interface StoredPrefsPayload {
   doNotPlayList: PrefListEntry[];
 }
 
-// docs/decisions/0018: this is the piece SettingsScreen.tsx's own
+// docs/decisions/0018: this is the piece the old SettingsScreen.tsx's own
 // persistLocal was missing - Mike's persistPrefs filters both lists to
 // permanent-only before building the object it saves; this port's
 // first version saved whatever list it was handed, unfiltered, so a

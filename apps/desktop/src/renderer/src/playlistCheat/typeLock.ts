@@ -84,7 +84,7 @@ export function detectStyleTypeLock(styleText: string): string[] | null {
 // Source folds the DJ's permanent Style Profile into this tab's own
 // Vibe Prompt (styleProfile+" "+spotifyPrompt, v1.0.22011) so a standing
 // preference doesn't need retyping into every tab separately. Our
-// Style Profile is saved by settings/SettingsScreen.tsx into
+// Style Profile is saved by settings/StyleProfilePopup.tsx into
 // localStorage under this same key - duplicated here rather than
 // imported (same cross-feature-folder judgment call as everywhere else
 // in this file), must stay in sync by hand if that key/shape changes.

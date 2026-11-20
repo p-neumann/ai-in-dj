@@ -33,6 +33,20 @@ export const lblStyle: React.CSSProperties = {
   marginBottom: 8
 };
 
+// Source line 5330 (sectionLbl) - distinct from lbl above (5314): no
+// `display:block`, margin is "0 0 12px" not marginBottom:8. Used for
+// popup section headers ("Theme", "Referral Program", "Style Profile",
+// "Do Play", "Do Not Play") - a different style from field labels,
+// confirmed by checking both definitions, not assumed to be the same.
+export const sectionLblStyle: React.CSSProperties = {
+  fontSize: 10,
+  color: GRAY,
+  textTransform: "uppercase",
+  letterSpacing: "0.12em",
+  fontWeight: 700,
+  margin: "0 0 12px"
+};
+
 export function inputStyle(theme: DerivedTheme): React.CSSProperties {
   return {
     width: "100%",

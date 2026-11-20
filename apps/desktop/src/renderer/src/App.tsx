@@ -23,7 +23,9 @@ import CrateCheatScreen from "./crateCheat/CrateCheatScreen";
 import { createInitialCrateCheatWork, type CrateCheatWork } from "./crateCheat/crateCheatWork";
 import PlaylistCheatScreen from "./playlistCheat/PlaylistCheatScreen";
 import type { MatchedResult } from "./playlistCheat/matchPlaylist.ts";
-import SettingsScreen from "./settings/SettingsScreen";
+import SettingsPopup from "./settings/SettingsPopup";
+import StyleProfilePopup from "./settings/StyleProfilePopup";
+import HistoryPopup from "./settings/HistoryPopup";
 import AppHeader from "./header/AppHeader";
 import AccountTab from "./account/AccountTab";
 import { useSavedTheme } from "./theme/useSavedTheme";
@@ -129,16 +131,33 @@ export default function App(): React.JSX.Element {
   const [tab, setTab] = useState(4);
   const [gigMode, setGigMode] = useState(false);
   const { theme, setTheme } = useSavedTheme();
-  const derived = deriveTheme(theme);
+
+  // Piece 13 (Settings split): while the Settings popup is open, EVERY
+  // themed pixel in the app shows the pending (unsaved) pick, not just
+  // the popup - source line 1886, `accent = showSettings ? pendingAccent
+  // : accentColor`. null = no popup open (or nothing staged yet), so
+  // the whole app falls back to the saved theme, which is also exactly
+  // what happens the instant the popup closes without saving (Cancel/
+  // click-outside never commits - see cancelSettingsPopup below).
+  //
+  // Deliberately NOT a full ThemePrefs - lightMode is never part of
+  // source's pending/staged mechanism (its own line 1887 reads
+  // `lightMode` straight from committed state even while showSettings
+  // is true, never from anything staged). Keeping only accentColor/
+  // bgColor here means toggling light mode from the header still works
+  // live while this popup is open, instead of freezing at whatever
+  // lightMode was when the popup was opened.
+  const [pendingTheme, setPendingTheme] = useState<{ accentColor: string; bgColor: string } | null>(null);
+  const derived = deriveTheme(pendingTheme ? { ...theme, ...pendingTheme } : theme);
 
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
   const [appVersion, setAppVersion] = useState("");
-  // Stage 1 bridge (piece 11), not the final design: the header's
-  // style-profile/history/settings-gear icons all open this one real
-  // SettingsScreen for now, since the source's 3 separate popups for
-  // those don't exist as their own components yet (piece 13 splits
-  // them apart). Nothing stops working in the meantime.
-  const [showSettingsBridge, setShowSettingsBridge] = useState(false);
+  // Piece 13 (Settings split, Stage 3): the header's style-profile/
+  // history/settings-gear icons now open three distinct real popups,
+  // replacing the single bridge screen piece 11 used as a stand-in.
+  const [showSettingsPopup, setShowSettingsPopup] = useState(false);
+  const [showStyleProfilePopup, setShowStyleProfilePopup] = useState(false);
+  const [showHistoryPopup, setShowHistoryPopup] = useState(false);
 
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
   const [crateList, setCrateList] = useState<CrateTrack[]>([]);
@@ -222,6 +241,29 @@ export default function App(): React.JSX.Element {
     setAlwaysOnTop(confirmed);
   }
 
+  // Piece 13 (Settings split). Ported from source's openSettings/
+  // saveSettings/cancelSettings (lines 1906-1908): opening seeds the
+  // pending pick from whatever's currently saved; Cancel (or clicking
+  // outside, which also calls this - PopupOverlay's onBackdropClick)
+  // just closes without committing, so the app-wide preview above falls
+  // straight back to the saved theme; Save commits pending -> saved.
+  function openSettingsPopup(): void {
+    setPendingTheme({ accentColor: theme.accentColor, bgColor: theme.bgColor });
+    setShowSettingsPopup(true);
+  }
+  function saveSettingsPopup(): void {
+    if (pendingTheme) setTheme({ ...theme, ...pendingTheme });
+    setPendingTheme(null);
+    setShowSettingsPopup(false);
+  }
+  function cancelSettingsPopup(): void {
+    setPendingTheme(null);
+    setShowSettingsPopup(false);
+  }
+  function updatePendingTheme(patch: Partial<{ accentColor: string; bgColor: string }>): void {
+    setPendingTheme((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
   return (
     <div style={{ fontFamily: "Arial,sans-serif", background: derived.bg, minHeight: "100vh", color: "#fff" }}>
       <AppHeader
@@ -233,7 +275,11 @@ export default function App(): React.JSX.Element {
         alwaysOnTop={alwaysOnTop}
         onToggleAlwaysOnTop={handleToggleAlwaysOnTop}
         onToggleLightMode={() => setTheme({ ...theme, lightMode: !theme.lightMode })}
-        onOpenSettingsBridge={() => setShowSettingsBridge(true)}
+        onOpenStyleProfile={() => setShowStyleProfilePopup(true)}
+        onOpenHistory={() => setShowHistoryPopup(true)}
+        onOpenSettings={openSettingsPopup}
+        isStyleProfileOpen={showStyleProfilePopup}
+        isSettingsOpen={showSettingsPopup}
       />
 
       <main style={{ padding: "1.5rem", maxWidth: 720, margin: "0 auto" }}>
@@ -319,22 +365,19 @@ export default function App(): React.JSX.Element {
         )}
       </main>
 
-      {showSettingsBridge && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => setShowSettingsBridge(false)}
-        >
-          <div
-            style={{ background: "#0d0d0d", border: "1px solid #444", borderRadius: 16, padding: "1rem", width: 680, maxWidth: "94vw", maxHeight: "84vh", overflowY: "auto" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button onClick={() => setShowSettingsBridge(false)} style={{ float: "right" }}>
-              × Close
-            </button>
-            <SettingsScreen sharedSession={sharedSession} theme={theme} setTheme={setTheme} />
-          </div>
-        </div>
+      {showSettingsPopup && pendingTheme && (
+        <SettingsPopup
+          savedTheme={{ accentColor: theme.accentColor, bgColor: theme.bgColor }}
+          pendingTheme={pendingTheme}
+          updatePendingTheme={updatePendingTheme}
+          onSave={saveSettingsPopup}
+          onCancel={cancelSettingsPopup}
+        />
       )}
+      {showStyleProfilePopup && (
+        <StyleProfilePopup sharedSession={sharedSession} theme={derived} onClose={() => setShowStyleProfilePopup(false)} />
+      )}
+      {showHistoryPopup && <HistoryPopup theme={derived} onClose={() => setShowHistoryPopup(false)} />}
     </div>
   );
 }
