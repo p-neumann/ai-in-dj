@@ -1,6 +1,6 @@
 0015 — One shared session for the whole app
 
-Status: Done. This is plumbing only. No change to how songs get picked, ranked, or filtered.
+Status: Done - but its thumbs-down framing is superseded by `docs/decisions/0022` (2026-11-21, Mike's call: thumbs-down stays Track Cheat only). The session-sharing this record describes is still accurate and still stands; only the "a thumbs-down should reach Crate Cheat" framing below is reversed - read 0022 alongside this. This is plumbing only. No change to how songs get picked, ranked, or filtered.
 Date: 2026-11-04
 
 What happened
